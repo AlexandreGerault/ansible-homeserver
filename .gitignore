@@ -1,0 +1,4 @@
+vars.yml
+public_keys/*
+!public_keys/.gitkeep
+!public_keys/ssh_keys/.gitkeep

@@ -1,0 +1,13 @@
+---
+- name: Install the homeservers
+  hosts: Homeservers
+  vars_files:
+    - vars.yml
+  remote_user: "{{ authorized_users }}"
+  become: true
+  become_method: ansible.builtin.su
+  become_flags: "-"
+  roles:
+    - ssh
+    - docker
+    - media

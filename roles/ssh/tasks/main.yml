@@ -1,0 +1,80 @@
+---
+- name: Include variables
+  ansible.builtin.include_vars: vars.yml
+
+- name: Disallow root SSH access
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PermitRootLogin"
+    line: "PermitRootLogin no"
+    state: present
+  notify:
+    - Restart ssh
+
+- name: Allow only authorized users to login
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^AllowUsers"
+    line: "AllowUsers {{ authorized_users | join(' ') }}"
+    state: present
+  notify:
+    - Restart ssh
+
+- name: "Add authorized_keys file for authorized users"
+  with_items: "{{ authorized_users }}"
+  ansible.builtin.template:
+    src: public_keys/ssh_keys/{{ item }}
+    dest: /home/{{ item }}/.ssh/authorized_keys
+    owner: "{{ item }}"
+    group: "{{ item }}"
+    mode: "0600"
+
+- name: Disallow password authentication
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+  notify:
+    - Restart ssh
+
+- name: Change SSHD port
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^Port "
+    line: "Port {{ ssh_port }}"
+    state: present
+  notify:
+    - Restart ssh
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Enable UFW and close all ports
+  community.general.ufw:
+    state: enabled
+    policy: deny
+
+- name: Allow all access to tcp port SSH_PORT, 80 and 443
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  with_items: ["{{ ssh_port }}", 80, 443]
+
+- name: Add neofetch
+  ansible.builtin.apt:
+    state: present
+    name: neofetch
+
+- name: Add htop
+  ansible.builtin.apt:
+    state: present
+    name: htop

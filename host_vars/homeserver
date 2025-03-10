@@ -1,0 +1,4 @@
+vars_data: "{{ lookup('file', 'vars.yml') | from_yaml }}"
+ansible_ssh_port: "{{ vars_data.ssh_port }}"
+ansible_ssh_host: "{{ vars_data.homeserver_host }}"
+ansible_ssh_user: "{{ vars_data.remote_user }}"

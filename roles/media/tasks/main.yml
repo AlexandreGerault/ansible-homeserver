@@ -1,0 +1,64 @@
+---
+- name: Create jellyfin group
+  ansible.builtin.group:
+    name: jellyfin
+
+- name: Create jellyfin user
+  ansible.builtin.user:
+    name: jellyfin
+    groups: ["jellyfin", "docker"]
+    append: true
+
+- name: Add users allowed to use jellyfin
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: jellyfin
+    append: true
+  with_items: "{{ jellyfin_users }}"
+
+- name: Prepare Jellyfin media folder
+  ansible.builtin.file:
+    path: /var/jellyfin/media
+    state: directory
+    mode: "0750"
+    owner: "{{ ansible_user_id }}"
+    group: jellyfin
+
+- name: Get Jellyfin user's UID and GID
+  ansible.builtin.getent:
+    database: passwd
+    key: jellyfin
+  register: jellyfin_user_info
+
+- name: Extract UID and GID
+  ansible.builtin.set_fact:
+    jellyfin_uid: "{{ jellyfin_user_info.ansible_facts.getent_passwd['jellyfin'][1] }}"
+    jellyfin_gid: "{{ jellyfin_user_info.ansible_facts.getent_passwd['jellyfin'][2] }}"
+
+- name: Start Jellyfin container
+  ansible.builtin.docker_container:
+    name: jellyfin
+    image: jellyfin/jellyfin
+    network_mode: host
+    # user: "{{ jellyfin_uid }}:{{ jellyfin_gid }}"
+    user: "{{ ansible_user_id }}"
+    state: started
+    restart: true
+    restart_policy: always
+    mounts:
+      - type: bind
+        source: /var/jellyfin/media
+        target: /media
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+
+- name: Add Caddy GPG key
+  ansible.builtin.apt_key:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+
+- name: Ensure Caddy is installed for reverse proxy
+  ansible.builtin.apt:
+    state: present
+    name: caddy
+    update_cache: true

@@ -1,0 +1,9 @@
+---
+authorized_users:
+  - my_user # CHANGE THIS TO YOUR USER + ADD OR REMOVE USERS BASED ON WHAT'S NEEDED
+ssh_port: 2222 # CHANGE THIS FOR A RANDOM PORT NUMBER
+homeserver_host: 192.168.1.1 # CHANGE THIS FOR YOUR HOMESERVER LOCAL (OR REMOTE) IP ADDRESS
+docker_users:
+  - my_user
+jellyfin_users:
+  - my_user
