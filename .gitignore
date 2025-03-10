@@ -1,4 +1,5 @@
-vars.yml
+.ansible
 public_keys/*
 !public_keys/.gitkeep
 !public_keys/ssh_keys/.gitkeep
+vars.yml
