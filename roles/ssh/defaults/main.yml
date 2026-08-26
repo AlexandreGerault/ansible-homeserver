@@ -1,0 +1,5 @@
+---
+ssh_port: 22
+authorized_users: []
+ssh_extra_allowed_users: []
+ssh_open_ports: ["{{ ssh_port }}", 80, 443]

@@ -1,0 +1,51 @@
+---
+- name: Create the jellyfin group
+  ansible.builtin.group:
+    name: jellyfin
+
+- name: Create the jellyfin service account
+  ansible.builtin.user:
+    name: jellyfin
+    groups: [jellyfin, docker]
+    append: true
+
+- name: Add the users allowed to manage the media library
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: jellyfin
+    append: true
+  loop: "{{ jellyfin_users }}"
+
+- name: Prepare the media root
+  ansible.builtin.file:
+    path: "{{ jellyfin_media_root }}"
+    state: directory
+    owner: root
+    group: jellyfin
+    mode: "0750"
+
+- name: Prepare the media libraries
+  ansible.builtin.file:
+    path: "{{ jellyfin_media_root }}/{{ item }}"
+    state: directory
+    owner: root
+    group: jellyfin
+    mode: "0770"
+  loop: "{{ jellyfin_media_libraries }}"
+
+# The container currently runs as root. Dropping it to the jellyfin account is
+# tracked as plan B5: it requires chowning the config and cache volumes first.
+- name: Run the Jellyfin container
+  community.docker.docker_container:
+    name: jellyfin
+    image: "{{ jellyfin_image }}"
+    network_mode: host
+    state: started
+    restart_policy: always
+    mounts:
+      - type: bind
+        source: "{{ jellyfin_media_root }}"
+        target: /media
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache

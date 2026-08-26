@@ -1,0 +1,36 @@
+---
+- name: "Ensure the {{ compose_app.name }} directory exists"
+  ansible.builtin.file:
+    path: "{{ apps_root }}/{{ compose_app.name }}"
+    state: directory
+    owner: "{{ homeserver_user }}"
+    group: "{{ homeserver_user }}"
+    mode: "0755"
+
+- name: "Deploy the {{ compose_app.name }} compose file"
+  ansible.builtin.copy:
+    src: "{{ compose_app.name }}/{{ compose_app.compose_file }}"
+    dest: "{{ apps_root }}/{{ compose_app.name }}/{{ compose_app.compose_file }}"
+    owner: "{{ homeserver_user }}"
+    group: "{{ homeserver_user }}"
+    mode: "0644"
+  register: compose_file_state
+
+- name: "Deploy the {{ compose_app.name }} environment file"
+  ansible.builtin.template:
+    src: "{{ compose_app.name }}.env.j2"
+    dest: "{{ apps_root }}/{{ compose_app.name }}/.env"
+    owner: "{{ homeserver_user }}"
+    group: "{{ homeserver_user }}"
+    mode: "0600"
+  register: env_file_state
+  when: compose_app.env | default(false)
+
+- name: "Bring the {{ compose_app.name }} stack up"
+  community.docker.docker_compose_v2:
+    project_src: "{{ apps_root }}/{{ compose_app.name }}"
+    files: ["{{ compose_app.compose_file }}"]
+    state: present
+    recreate: "{{ 'always' if (compose_file_state.changed or env_file_state.changed | default(false)) else 'auto' }}"
+  become: true
+  become_user: "{{ homeserver_user }}"

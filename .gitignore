@@ -1,5 +1,9 @@
 .ansible
-public_keys/*
-!public_keys/.gitkeep
-!public_keys/ssh_keys/.gitkeep
+*.retry
+
+# Legacy layout, superseded by group_vars/all/{main,vault}.yml
 vars.yml
+
+# Never commit the vault password
+.vault-pass
+vault-pass

@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+{{ site.domain }} {
+{% if site.log | default(false) %}
+    log {
+        output file {{ caddy_log_file }} {
+            roll_size 10MB
+            roll_keep 5
+            roll_keep_days 14
+        }
+    }
+{% endif %}
+    reverse_proxy :{{ site.upstream_port }}
+}

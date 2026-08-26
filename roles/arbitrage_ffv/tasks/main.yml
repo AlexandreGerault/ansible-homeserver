@@ -1,0 +1,45 @@
+---
+# This stack was created by hand with two `docker run` invocations, with its
+# credentials passed on the command line — they ended up in the shell history.
+# Rotating them is tracked as plan B3.
+- name: Create the arbitrage_ffv network
+  community.docker.docker_network:
+    name: "{{ arbitrage_ffv_network }}"
+    state: present
+
+- name: Run the MySQL container
+  community.docker.docker_container:
+    name: arbitrage_ffv_mysql
+    image: "{{ arbitrage_ffv_mysql_image }}"
+    state: started
+    restart_policy: always
+    networks:
+      - name: "{{ arbitrage_ffv_network }}"
+    env:
+      MYSQL_ROOT_PASSWORD: "{{ vault_arbitrage_ffv_mysql_root_password }}"
+    volumes:
+      - "{{ arbitrage_ffv_mysql_volume }}:/var/lib/mysql"
+
+- name: Run the application container
+  community.docker.docker_container:
+    name: arbitrage_ffv_app
+    image: "{{ arbitrage_ffv_image }}"
+    state: started
+    restart_policy: always
+    networks:
+      - name: "{{ arbitrage_ffv_network }}"
+    ports:
+      - "{{ arbitrage_ffv_http_port }}:80"
+      - "{{ arbitrage_ffv_https_port }}:443"
+    etc_hosts:
+      host.docker.internal: host-gateway
+    env:
+      SERVER_NAME: ":80"
+      APP_URL: "{{ arbitrage_ffv_url }}"
+      APP_KEY: "{{ vault_arbitrage_ffv_app_key }}"
+      DB_CONNECTION: mysql
+      DB_HOST: arbitrage_ffv_mysql
+      DB_DATABASE: "{{ arbitrage_ffv_db_name }}"
+      DB_USERNAME: "{{ arbitrage_ffv_db_user }}"
+      DB_PASSWORD: "{{ vault_arbitrage_ffv_db_password }}"
+      TRUSTEDPROXY_PROXIES: "*"

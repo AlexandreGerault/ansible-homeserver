@@ -1,59 +1,83 @@
 ---
-- name: Include vars
-  ansible.builtin.include_vars: vars.yml
-
-- name: Remove conflicting packages
-  ansible.builtin.apt:
-    state: "absent"
-    name: "{{ item }}"
-    update_cache: true
-  with_items:
-    - docker.io
-    - docker-doc
-    - docker-compose
-    - podman-docker
-    - containerd
-    - runc
-
-- name: Install prerequisites for Docker repository
+- name: Remove the conflicting distribution packages
   ansible.builtin.apt:
     name:
-      [
-        "apt-transport-https",
-        "ca-certificates",
-        "curl",
-        "gnupg2",
-        "software-properties-common",
-      ]
-    update_cache: true
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
 
-- name: Add Docker GPG key
-  ansible.builtin.apt_key:
-    url: https://download.docker.com/linux/debian/gpg
-
-- name: Add docker apt repository.
-  ansible.builtin.apt_repository:
-    repo: deb [arch=amd64] https://download.docker.com/{{ ansible_system | lower }}/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable
-
-- name: Install docker packages
+- name: Install the prerequisites for the Docker repository
   ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg2
+      - software-properties-common
     state: present
     update_cache: true
-    name: "{{ item }}"
-  with_items:
-    - docker-ce
-    - docker-ce-cli
-    - containerd.io
-    - docker-buildx-plugin
-    - docker-compose-plugin
+    cache_valid_time: 3600
 
-- name: Create docker group
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Install the Docker signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Drop the legacy .list repository definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/download_docker_com_linux_debian.list
+    state: absent
+
+- name: Declare the Docker repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [stable]
+    architectures: [amd64]
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+
+- name: Install the Docker packages
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: true
+
+- name: Configure the Docker daemon
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create the docker group
   ansible.builtin.group:
     name: docker
 
-- name: Add users allowed to use docker
+- name: Add the users allowed to reach the Docker socket
   ansible.builtin.user:
     name: "{{ item }}"
     groups: docker
     append: true
-  with_items: "{{ docker_users }}"
+  loop: "{{ docker_users }}"

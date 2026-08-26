@@ -1,0 +1,4 @@
+---
+common_timezone: Etc/UTC
+common_locale: en_US.UTF-8
+common_packages: []

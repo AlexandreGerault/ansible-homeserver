@@ -1,0 +1,5 @@
+---
+jellyfin_users: []
+jellyfin_image: jellyfin/jellyfin
+jellyfin_media_root: /var/jellyfin/media
+jellyfin_media_libraries: []

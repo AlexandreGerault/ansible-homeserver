@@ -1,0 +1,17 @@
+---
+# {{ ansible_managed }}
+- Multimédia:
+    - Jellyfin:
+        href: https://bibliofilm.alexandre-gerault.fr
+        icon: jellyfin.png
+        description: Streaming de films, séries et musiques
+        container: jellyfin
+        widget:
+            type: jellyfin
+            url: https://bibliofilm.alexandre-gerault.fr
+            key: {{ vault_homepage_jellyfin_api_key }}
+    - ArbitrageFFV:
+        href: https://arbitrageffv.alexandre-gerault.fr/
+        icon: mdi-sail-boat
+        description: Application de gestion des inspections de bateaux
+        container: arbitrage_ffv_app

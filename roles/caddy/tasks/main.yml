@@ -1,0 +1,70 @@
+---
+# Caddy comes from Debian bookworm main (2.6.2-5), not from the Cloudsmith
+# repository: the previous role added the Cloudsmith signing key but never the
+# repository itself, so the key was dead weight.
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure the log directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_log_dir }}"
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0755"
+
+- name: Ensure the site directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_sites_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the main Caddyfile
+  ansible.builtin.copy:
+    src: Caddyfile
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: caddy validate --adapter caddyfile --config %s
+  notify: Reload caddy
+
+- name: Deploy the reverse proxy sites
+  ansible.builtin.template:
+    src: site.Caddyfile.j2
+    dest: "{{ caddy_sites_dir }}/{{ site.name }}.Caddyfile"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ caddy_sites }}"
+  loop_control:
+    loop_var: site
+    label: "{{ site.domain }}"
+  notify: Reload caddy
+
+- name: List the site files currently on disk
+  ansible.builtin.find:
+    paths: "{{ caddy_sites_dir }}"
+    patterns: "*.Caddyfile"
+  register: caddy_existing_sites
+
+- name: Remove the site files that are no longer declared
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  vars:
+    caddy_declared_files: "{{ caddy_sites | map(attribute='name') | map('regex_replace', '^', caddy_sites_dir + '/') | map('regex_replace', '$', '.Caddyfile') | list }}"
+  loop: "{{ caddy_existing_sites.files | map(attribute='path') | difference(caddy_declared_files) }}"
+  notify: Reload caddy
+
+- name: Ensure Caddy is enabled and running
+  ansible.builtin.service:
+    name: caddy
+    state: started
+    enabled: true

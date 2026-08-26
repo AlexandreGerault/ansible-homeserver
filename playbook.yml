@@ -1,13 +1,32 @@
 ---
-- name: Install the homeservers
-  hosts: Homeservers
-  vars_files:
-    - vars.yml
-  remote_user: "{{ authorized_users }}"
+- name: Configure the homeserver
+  hosts: homeservers
   become: true
-  become_method: ansible.builtin.su
-  become_flags: "-"
+
   roles:
-    - ssh
-    - docker
-    - media
+    - role: common
+      tags: [common]
+    - role: ssh
+      tags: [ssh]
+    - role: docker
+      tags: [docker]
+    - role: caddy
+      tags: [caddy]
+    - role: jellyfin
+      tags: [jellyfin, apps]
+    - role: homepage
+      tags: [homepage, apps]
+    - role: arbitrage_ffv
+      tags: [arbitrage_ffv, apps]
+
+  tasks:
+    - name: Deploy the docker compose applications
+      ansible.builtin.include_role:
+        name: compose_app
+      vars:
+        compose_app: "{{ stack }}"
+      loop: "{{ compose_apps }}"
+      loop_control:
+        loop_var: stack
+        label: "{{ stack.name }}"
+      tags: [compose, apps]

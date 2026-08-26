@@ -1,0 +1,159 @@
+---
+# =============================================================================
+# Connection
+# =============================================================================
+homeserver_host: dashboard.homelab.alexandre-gerault.fr
+homeserver_user: alexandregerault
+ssh_port: 35123
+
+# =============================================================================
+# Accounts
+# =============================================================================
+# Accounts that exist on the managed node and receive an authorized_keys file.
+# Their public keys live in vault_ssh_authorized_keys.
+authorized_users:
+  - alexandregerault
+
+# Extra names kept in sshd's AllowUsers directive. `alexandre` is a leftover:
+# the account does not exist in /etc/passwd. Removal is tracked as plan B4.
+ssh_extra_allowed_users:
+  - alexandre
+
+docker_users:
+  - alexandregerault
+
+jellyfin_users:
+  - alexandregerault
+
+# =============================================================================
+# System
+# =============================================================================
+common_timezone: Europe/Paris
+common_locale: en_US.UTF-8
+
+# Packages actually installed on the node, beyond the Debian base system.
+common_packages:
+  # shell comfort
+  - bash-completion
+  - htop
+  - neofetch
+  - neovim
+  - nano
+  - less
+  # tooling
+  - git
+  - jq
+  - curl
+  - wget
+  - unzip
+  - plocate
+  - lsof
+  # networking / diagnostics
+  - bind9-dnsutils
+  - traceroute
+  - netcat-traditional
+  # build toolchain (used for the archi-ordinateurs coursework)
+  - build-essential
+  - gcc-multilib
+  - binutils
+  - putty
+  # firmware
+  - intel-microcode
+  - firmware-misc-nonfree
+
+# =============================================================================
+# Docker
+# =============================================================================
+docker_daemon_options:
+  log-driver: json-file
+  log-opts:
+    max-size: 10m
+    max-file: "3"
+  default-address-pools:
+    - base: 10.0.0.0/8
+      size: 24
+
+# =============================================================================
+# Caddy — reverse proxy vhosts, one file per site in /etc/caddy/caddyfiles.d
+# =============================================================================
+caddy_log_file: /var/log/caddy/access.log
+
+caddy_sites:
+  - name: homepage
+    domain: dashboard.homelab.alexandre-gerault.fr
+    upstream_port: 8097
+  - name: jellyfin
+    domain: bibliofilm.alexandre-gerault.fr
+    upstream_port: 8096
+  - name: arbitrageffv
+    domain: arbitrageffv.alexandre-gerault.fr
+    upstream_port: 8000
+  - name: authelia
+    domain: authelia.alexandre-gerault.fr
+    upstream_port: 8098
+  - name: excalidraw
+    domain: excalidraw.alexandre-gerault.fr
+    upstream_port: 5000
+  - name: affine
+    domain: affine.alexandre-gerault.fr
+    upstream_port: 3010
+    log: true
+  - name: monitor
+    domain: monitor.alexandre-gerault.fr
+    upstream_port: 3001
+    log: true
+  - name: penpot
+    domain: penpot.alexandre-gerault.fr
+    upstream_port: 9001
+    log: true
+  - name: scholarsome
+    domain: scholarsome.alexandre-gerault.fr
+    upstream_port: 4444
+    log: true
+
+# =============================================================================
+# Jellyfin
+# =============================================================================
+jellyfin_media_root: /var/jellyfin/media
+jellyfin_media_libraries:
+  - anime
+  - movie
+  - music
+  - show
+
+# =============================================================================
+# Homepage
+# =============================================================================
+homepage_config_dir: /etc/homepage/config
+homepage_port: 8097
+
+# =============================================================================
+# arbitrage_ffv — Laravel app + MySQL, previously launched by hand
+# =============================================================================
+arbitrage_ffv_network: arbitrage_ffv_network
+arbitrage_ffv_image: ghcr.io/thomaslecler/arbitrage_ffv:master
+arbitrage_ffv_url: https://arbitrageffv.alexandre-gerault.fr/
+arbitrage_ffv_http_port: 8000
+arbitrage_ffv_https_port: 4433
+arbitrage_ffv_db_name: arbitrage_ffv
+arbitrage_ffv_db_user: arbitrage_ffv_laravel
+arbitrage_ffv_mysql_image: mysql:8.0
+# Anonymous volume created by hand; kept as-is so the data is not lost.
+arbitrage_ffv_mysql_volume: d15ca90ceae716632032cd23049bc78005011ac5980cd233923d193bb227fe41
+
+# =============================================================================
+# Docker Compose stacks living under ~/apps
+# =============================================================================
+apps_root: "/home/{{ homeserver_user }}/apps"
+
+compose_apps:
+  - name: uptime-kuma
+    compose_file: compose.yaml
+  - name: penpot
+    compose_file: docker-compose.yaml
+  - name: scholarsome
+    compose_file: compose.yml
+    env: true
+  - name: affine
+    compose_file: docker-compose.yml
+    env: true

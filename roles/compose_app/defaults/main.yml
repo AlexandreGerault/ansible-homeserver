@@ -1,0 +1,7 @@
+---
+# One entry of the `compose_apps` list, injected by the playbook:
+#   name:         directory name under apps_root, also the compose project name
+#   compose_file: file name expected by the stack (compose.yml, docker-compose.yaml, ...)
+#   env:          true when the stack needs a templated .env file
+compose_app: {}
+apps_root: "/home/{{ homeserver_user }}/apps"

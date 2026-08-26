@@ -1,0 +1,66 @@
+---
+- name: Ensure the homepage configuration directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ homepage_config_dir }}"
+    - "{{ homepage_config_dir }}/images"
+
+- name: Deploy the static homepage configuration
+  ansible.builtin.copy:
+    src: "config/{{ item }}"
+    dest: "{{ homepage_config_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - settings.yaml
+    - bookmarks.yaml
+    - widgets.yaml
+    - docker.yaml
+    - kubernetes.yaml
+    - custom.css
+    - custom.js
+  notify: Restart homepage
+
+- name: Deploy the background image
+  ansible.builtin.copy:
+    src: images/background.jpg
+    dest: "{{ homepage_config_dir }}/images/background.jpg"
+    owner: root
+    group: root
+    mode: "0644"
+
+# services.yaml carries the Jellyfin API key, so it is templated from the vault
+# instead of being copied verbatim.
+- name: Deploy the services configuration
+  ansible.builtin.template:
+    src: services.yaml.j2
+    dest: "{{ homepage_config_dir }}/services.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart homepage
+
+- name: Run the homepage container
+  community.docker.docker_container:
+    name: homepage
+    image: "{{ homepage_image }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ homepage_port }}:3000"
+    mounts:
+      - type: bind
+        source: "{{ homepage_config_dir }}"
+        target: /app/config
+      - type: bind
+        source: "{{ homepage_config_dir }}/images/background.jpg"
+        target: /app/public/background.jpg
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock

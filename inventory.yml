@@ -1,4 +1,4 @@
 ---
-Homeservers:
+homeservers:
   hosts:
     homeserver:

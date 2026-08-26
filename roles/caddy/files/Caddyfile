@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/caddy/files/Caddyfile
+#
+# Caddy serves nothing of its own here: every site is a reverse proxy defined
+# in its own file under caddyfiles.d/, generated from the `caddy_sites`
+# variable. The :80 block below is the catch-all for requests that reach the
+# server without a matching Host header.
+
+:80 {
+	root * /usr/share/caddy
+	file_server
+}
+
+import caddyfiles.d/*

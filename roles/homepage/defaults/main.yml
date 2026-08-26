@@ -1,0 +1,4 @@
+---
+homepage_image: ghcr.io/gethomepage/homepage:latest
+homepage_config_dir: /etc/homepage/config
+homepage_port: 8097
