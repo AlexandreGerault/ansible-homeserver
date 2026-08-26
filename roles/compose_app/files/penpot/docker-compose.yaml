@@ -83,7 +83,7 @@ services:
     image: "penpotapp/frontend:${PENPOT_VERSION:-latest}"
     restart: always
     ports:
-      - 9001:8080
+      - 127.0.0.1:9001:8080
 
     volumes:
       - penpot_assets:/opt/data/assets
@@ -257,6 +257,6 @@ services:
     expose:
       - '1025'
     ports:
-      - "1080:1080"
+      - "127.0.0.1:1080:1080"
     networks:
       - penpot

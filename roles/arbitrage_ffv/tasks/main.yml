@@ -29,8 +29,8 @@
     networks:
       - name: "{{ arbitrage_ffv_network }}"
     ports:
-      - "{{ arbitrage_ffv_http_port }}:80"
-      - "{{ arbitrage_ffv_https_port }}:443"
+      - "{{ docker_publish_address }}:{{ arbitrage_ffv_http_port }}:80"
+      - "{{ docker_publish_address }}:{{ arbitrage_ffv_https_port }}:443"
     etc_hosts:
       host.docker.internal: host-gateway
     env:

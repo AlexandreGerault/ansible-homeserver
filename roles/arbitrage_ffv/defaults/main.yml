@@ -4,3 +4,4 @@ arbitrage_ffv_image: ghcr.io/thomaslecler/arbitrage_ffv:master
 arbitrage_ffv_mysql_image: mysql:8.0
 arbitrage_ffv_http_port: 8000
 arbitrage_ffv_https_port: 4433
+docker_publish_address: "127.0.0.1"

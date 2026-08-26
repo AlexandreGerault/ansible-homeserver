@@ -35,11 +35,18 @@
 
 # The container currently runs as root. Dropping it to the jellyfin account is
 # tracked as plan B5: it requires chowning the config and cache volumes first.
+#
+# Host networking published 8096 on every interface, bypassing both UFW and
+# Caddy. Bridge networking with a loopback binding keeps the reverse proxy as
+# the only way in. The cost is DLNA and client auto-discovery on the LAN, which
+# need the host network stack; set jellyfin_network_mode back to `host` if you
+# ever want them.
 - name: Run the Jellyfin container
   community.docker.docker_container:
     name: jellyfin
     image: "{{ jellyfin_image }}"
-    network_mode: host
+    network_mode: "{{ jellyfin_network_mode }}"
+    ports: "{{ [docker_publish_address ~ ':8096:8096'] if jellyfin_network_mode != 'host' else omit }}"
     state: started
     restart_policy: always
     mounts:

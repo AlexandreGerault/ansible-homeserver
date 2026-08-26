@@ -53,7 +53,7 @@
     state: started
     restart_policy: unless-stopped
     ports:
-      - "{{ homepage_port }}:3000"
+      - "{{ docker_publish_address }}:{{ homepage_port }}:3000"
     mounts:
       - type: bind
         source: "{{ homepage_config_dir }}"
