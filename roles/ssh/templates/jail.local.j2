@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+#
+# Debian 12 ships no rsyslog and no /var/log/auth.log: sshd only logs to the
+# journal. With the stock `backend = auto` fail2ban finds no log file, and the
+# stock `port = ssh` watches 22 while sshd listens elsewhere — so the default
+# installation protects nothing at all.
+
+[DEFAULT]
+bantime = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+{% if fail2ban_ignoreips %}
+ignoreip = {{ fail2ban_ignoreips | join(' ') }}
+{% endif %}
+
+[sshd]
+enabled = true
+backend = systemd
+port = {{ ssh_port }}
