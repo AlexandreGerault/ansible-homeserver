@@ -1,154 +1,110 @@
-# Ansible - Personal HomeLab
+# Ansible — Personal HomeLab
 
-My personal ansible repository to configure my homelab. I'll try to make it as generic as possible so it can be easily cloned. However I do not recommend to clone it to use it as a base since it highly depends on my own network configuration (what machines I'm using, how I set their network configuration etc).
+My personal Ansible repository to configure my homelab. It describes one machine,
+a mini-PC serving as a homeserver, and everything running on it.
 
-## My configuration
+> [!NOTE]
+> I'm describing MY OWN setup, for MY OWN homelab. I do not intend to share this
+> so people can reuse it. I'm open to discussions about improvements (especially
+> about security or the use of Ansible), but don't ask for features. I also
+> discourage cloning this repository: it would likely be more useful to write your
+> own for YOUR OWN homelab. Below, "you" refers to the future me.
 
-> [!NOTE]  
-> I'm describing MY OWN setup, for MY OWN homelab. Then keep in mind that I do not intend to share this so people can reuse it. I'm openminded and open to discussions about improvement about this (especially about security or use of ansible), but don't try to ask for features. I also discourage the use of this repository: it would likely be more useful to make your own ansible repository for YOUR OWN homelab. Indeed, this is very likely that our infrastructure differ so I highly recommend you only take what might interest you as a source of inspiration. Below, the use of "you" will actually refers to the future me.
+## The machine
 
-I'm currently running a very basic homelab. It contains only one mini-PC serving as a homeserver. It will handle every applications in the beginning, as long as it fits my needs. Thus the configuration could be done in one simple yaml file. But in order to make it easier to read, to maintain and to evolve I'm trying to get it well organised already.
+- Mini PC — HP EliteDesk 800 G2 (Intel Core i5 6500U, 8GB DDR4, 256GB SSD), Debian 12 bookworm
+- Modem supplied by the ISP
 
-Machines :
+## What is managed
 
-- Mini PC : HP EliteDesk 800 G2 (Intel Core i5 6500U - 8GB DDR4 - 256GB SSD)
-- Modem (the one supplied by ISP)
+| Role | What it does |
+| --- | --- |
+| `common` | Timezone, locale, the packages that are actually installed |
+| `ssh` | sshd hardening, authorized keys, fail2ban, UFW |
+| `docker` | Docker CE from the upstream deb822 repository, `daemon.json`, the `docker` group |
+| `caddy` | Reverse proxy: main `Caddyfile` plus one vhost file per site, generated from `caddy_sites` |
+| `jellyfin` | Media account, media libraries, the Jellyfin container |
+| `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
+| `arbitrage_ffv` | The Laravel app and its MySQL database |
+| `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
-Desired applications :
+Services reachable from the outside, all proxied by Caddy:
 
-- Jellyfin
+| Domain | Upstream |
+| --- | --- |
+| `dashboard.homelab.alexandre-gerault.fr` | homepage, 8097 |
+| `bibliofilm.alexandre-gerault.fr` | jellyfin, 8096 |
+| `affine.alexandre-gerault.fr` | affine, 3010 |
+| `penpot.alexandre-gerault.fr` | penpot, 9001 |
+| `scholarsome.alexandre-gerault.fr` | scholarsome, 4444 |
+| `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 |
+| `arbitrageffv.alexandre-gerault.fr` | arbitrage_ffv, 8000 |
+| `authelia.alexandre-gerault.fr` | authelia, 8098 — **not configured, the container restart-loops** |
+| `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
-This configuration needs some basic setup, such as an OpenSSH server, security configuration (firewall, fail2ban etc) and docker.
+## Variables
 
-## Setup the homelab
+Everything that is not a secret lives in `group_vars/all/main.yml`, in plain sight
+and versioned. Every secret lives in `group_vars/all/vault.yml`, encrypted with
+`ansible-vault` and versioned too — that is the point: a disk failure must not
+take the configuration with it.
 
-To setup the homelab with this ansible playbook you have to copy and edit the variables file:
+`host_vars/homeserver.yml` only maps the connection variables onto
+`homeserver_host`, `ssh_port` and `homeserver_user`.
 
-```zsh
-cp vars.example.yml vars.yml
-nvim vars.yml
-```
+The vault holds:
 
-<table>
-    <thead>
-        <tr>
-            <td>Variable</td>
-            <td>Description</td>
-            <td>Nullable</td>
-            <td>Example</td>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>authorized_users</code></td>
-            <td>The list of users that are allowed to connect on the server using SSH</td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-authorized_users:
-  - my_user
-  - my_buddy
-  - my_bestie</pre>
-            </td>
-        </tr>
-        <tr>
-            <td><code>remote_user</code></td>
-            <td>User to actually use for the SSH connection Ansible will use</td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-remote_user: my_user</pre>
-            </td>
-        </tr>
-        <tr>
-            <td><code>ssh_port</code></td>
-            <td>The SSH port that will used after the first run of Ansible. Considered a good practice not to use a common port like 22 or 2222.</td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-ssh_port: 2222 # CONSIDERED A BAD PRACTICE TO KEEP IT AT 22 OR 2222</pre>
-            </td>
-        </tr>
-        <tr>
-            <td><code>homeserver_host</code></td>
-            <td>Very likely to evolve. For the moment I'm managing only one machine. But it might soon turn out that this is not enough. Then I guess I'll look for something that is more like a dictionnary or a map structure.<br/><br/>
-            This represents the IP of the managed node.
-            </td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-homeserver_host: 192.168.1.1 # CHANGE THIS FOR YOUR HOMESERVER LOCAL (OR REMOTE) IP ADDRESS</pre>
-            </td>
-        </tr>
-        <tr>
-            <td><code>docker_users</code></td>
-            <td>The variable used to add users from managed node to the <code>docker</code> group</td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-docker_users:
-  - my_user
-  - your_user
-  - his_user
-  - her_user</pre>
-            </td>
-        </tr>
-        <tr>
-            <td><code>jellyfin_users</code></td>
-            <td>The variable used to add users from managed node to the <code>jellyfin</code> group</td>
-            <td><code>No</code></td>
-            <td>
-                <pre lang="yaml">---
-jellyfin_users:
-  - my_user
-  - your_user
-  - his_user
-  - her_user</pre>
-            </td>
-        </tr>
-    </tbody>
-</table>
+| Variable | Used by |
+| --- | --- |
+| `vault_ssh_authorized_keys` | `ssh` — a dict of account name to list of public keys |
+| `vault_homepage_jellyfin_api_key` | `homepage` — the Jellyfin widget |
+| `vault_affine_db_password` | `compose_app` — affine's Postgres |
+| `vault_scholarsome_database_password`, `vault_scholarsome_jwt_secret` | `compose_app` — scholarsome |
+| `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
+| `vault_authelia_*` | kept as a backup; authelia has no role yet |
 
-Once you edited the variables to your needs, let's create a pair of SSH private and public keys. If you already have keys, you can use them. To make is easy to use, you can copy the SSH public keys you want to allow in the servers with the role `ssh` in the `public_keys/ssh_keys` folder. Each public key should be named after the user it corresponds to.
+## Running it
 
-For example, if I have 4 users to allow on a managed node, I'll have this structure, where each file is an actual SSH public key:
-
-```plain
-.
-└── public_keys
-    └── ssh_keys
-        ├── her_user
-        ├── his_user
-        ├── my_user
-        └── your_user
-```
-
-> [!CAUTION]
-> Pay attention to the file you copy in the ssh_keys folder. Indeed, you do not want to copy your private SSH key. NEVER.
-
-Once we have our variables and ssh public keys set up, let's look at the inventory file.
-
-At the moment, the `inventory.yml` file only contains one node, which is our server:
-
-```yaml
----
-Homeservers:
-  hosts:
-    homeserver:
-```
-
-As said above, we only manage one node at this stage. The variables for each hosts are defined in the `host_vars/homeserver` file, which actually reuse variables set up just before.
-
-Now let's review the `playbook.yml` file. We can see it defines one task, which is to install the different roles on the only server.
-
-Once we made sure everything is fine, let's run ansible:
+The vault password is read from `~/.ansible/vault-pass`, as declared in
+`ansible.cfg`. That file is **not** in the repository — keep a copy in your
+password manager, it is the one thing that cannot be recovered from the server.
 
 ```bash
-ansible-playbook playbook.yml -i inventory.yml
+# once
+brew install ansible          # or pipx install ansible
+ansible-galaxy install -r requirements.yml
+
+# every run — -K prompts for the sudo password
+ansible-playbook playbook.yml -K
 ```
 
-## Improvements
+Useful invocations:
 
-There's certainly a lot to say. This is my first attempt of using Ansible, thus I'm still discovering features and pratices to get the job done.
+```bash
+ansible-playbook playbook.yml -K --check --diff     # dry run, shows the drift
+ansible-playbook playbook.yml -K --tags caddy       # one role
+ansible-vault edit group_vars/all/vault.yml         # edit the secrets
+```
 
-I guess the usecases will emerge and needed refactors will then appears more obviously.
+## Known gaps
+
+Tracked, deliberately out of scope of the catch-up, because they change the
+running server rather than describe it:
+
+1. **Published ports.** Every container port bound to `0.0.0.0` is reachable from
+   the internet. Docker writes its own iptables rules, so UFW never sees the traffic
+   and the reverse proxy is bypassed. Verified from outside on 2026-08-25: 3001,
+   3010, 4444, 8000, 8096, 8097 and 1080 all answer. Port 1080 is Penpot's
+   mailcatcher, which serves every mail the instance sends with no authentication.
+   They should all be bound to `127.0.0.1`.
+2. **fail2ban.** The Debian default jail watches port 22. sshd listens on 35123, so
+   nothing is actually being protected.
+3. **Leaked credentials.** The arbitrage_ffv `APP_KEY` and MySQL password were passed
+   on the command line and sit in `~/.bash_history`. They need rotating.
+4. **`AllowUsers`** still lists `alexandre`, an account that does not exist.
+5. **Jellyfin** runs as root inside its container.
+6. **Penpot** runs with the stock `PENPOT_SECRET_KEY: change-this-insecure-key` from
+   the upstream sample compose file. It derives the session and invitation keys.
+7. **Dead services.** authelia was never configured, excalidraw is gone, coolify is
+   installed with no container running.
+8. **No backups.** Nothing on this machine is backed up.
