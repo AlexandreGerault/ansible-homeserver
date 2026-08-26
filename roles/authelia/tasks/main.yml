@@ -1,0 +1,89 @@
+---
+# Authelia had never started: its two configuration files were the untouched
+# 71KB upstream template, so every mandatory section was missing, and the
+# container published 9091 while the Caddy vhost proxied to 8098.
+
+- name: Ensure the authelia directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ authelia_config_dir }}"
+      mode: "0755"
+    - path: "{{ authelia_config_dir }}/secrets"
+      mode: "0700"
+    - path: "{{ authelia_data_dir }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Deploy the authelia secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ authelia_config_dir }}/secrets/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - name: JWT_SECRET
+      value: "{{ vault_authelia_jwt_secret }}"
+    - name: SESSION_SECRET
+      value: "{{ vault_authelia_session_secret }}"
+    - name: STORAGE_ENCRYPTION_KEY
+      value: "{{ vault_authelia_storage_encryption_key }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  notify: Restart authelia
+
+- name: Deploy the authelia configuration
+  ansible.builtin.template:
+    src: configuration.yml.j2
+    dest: "{{ authelia_config_dir }}/configuration.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart authelia
+
+- name: Deploy the users database
+  ansible.builtin.template:
+    src: users_database.yml.j2
+    dest: "{{ authelia_config_dir }}/users_database.yml"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart authelia
+
+- name: Run the authelia container
+  community.docker.docker_container:
+    name: authelia
+    image: "{{ authelia_image }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ docker_publish_address }}:{{ authelia_port }}:9091"
+    env:
+      X_AUTHELIA_CONFIG: /config/configuration.yml
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/JWT_SECRET
+      AUTHELIA_SESSION_SECRET_FILE: /secrets/SESSION_SECRET
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/STORAGE_ENCRYPTION_KEY
+    mounts:
+      - type: bind
+        source: "{{ authelia_config_dir }}/configuration.yml"
+        target: /config/configuration.yml
+        read_only: true
+      - type: bind
+        source: "{{ authelia_config_dir }}/users_database.yml"
+        target: /config/users_database.yml
+        read_only: true
+      - type: bind
+        source: "{{ authelia_config_dir }}/secrets"
+        target: /secrets
+        read_only: true
+      - type: bind
+        source: "{{ authelia_data_dir }}"
+        target: /data

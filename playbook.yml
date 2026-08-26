@@ -12,6 +12,8 @@
       tags: [docker]
     - role: caddy
       tags: [caddy]
+    - role: authelia
+      tags: [authelia, apps]
     - role: jellyfin
       tags: [jellyfin, apps]
     - role: homepage

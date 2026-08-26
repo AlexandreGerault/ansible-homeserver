@@ -118,6 +118,16 @@ caddy_sites:
     log: true
 
 # =============================================================================
+# Authelia — SSO. Add `protect: true` to a caddy_sites entry to put it behind
+# the login portal; nothing is protected until you do.
+# =============================================================================
+authelia_port: 8098
+authelia_domain: authelia.alexandre-gerault.fr
+authelia_root_domain: alexandre-gerault.fr
+authelia_default_redirect: https://dashboard.homelab.alexandre-gerault.fr
+caddy_authelia_upstream: "127.0.0.1:8098"
+
+# =============================================================================
 # Jellyfin
 # =============================================================================
 jellyfin_media_root: /var/jellyfin/media

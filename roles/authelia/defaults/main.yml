@@ -1,0 +1,16 @@
+---
+authelia_image: ghcr.io/authelia/authelia:4.38
+authelia_config_dir: /etc/authelia
+authelia_data_dir: /var/lib/authelia
+authelia_port: 8098
+authelia_domain: authelia.alexandre-gerault.fr
+authelia_root_domain: alexandre-gerault.fr
+authelia_default_redirect: https://dashboard.homelab.alexandre-gerault.fr
+authelia_log_level: info
+docker_publish_address: "127.0.0.1"
+
+# Access rules, evaluated in order. The default policy denies everything that
+# no rule matches.
+authelia_access_rules:
+  - domain: "*.{{ authelia_root_domain }}"
+    policy: one_factor

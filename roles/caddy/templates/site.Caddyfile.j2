@@ -9,5 +9,11 @@
         }
     }
 {% endif %}
+{% if site.protect | default(false) %}
+    forward_auth {{ caddy_authelia_upstream }} {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+{% endif %}
     reverse_proxy :{{ site.upstream_port }}
 }

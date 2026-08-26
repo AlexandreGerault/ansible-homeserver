@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+---
+users:
+{% for name, user in vault_authelia_users.items() %}
+  {{ name }}:
+    disabled: false
+    displayname: '{{ user.displayname }}'
+    password: '{{ user.password_hash }}'
+    email: '{{ user.email }}'
+    groups:
+{% for group in user.groups %}
+      - {{ group }}
+{% endfor %}
+{% endfor %}
