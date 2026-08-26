@@ -25,6 +25,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `caddy` | Reverse proxy: main `Caddyfile` plus one vhost file per site, generated from `caddy_sites` |
 | `jellyfin` | Media account, media libraries, the Jellyfin container |
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
+| `authelia` | The SSO portal: configuration, users database, secrets, container |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
@@ -39,7 +40,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `scholarsome.alexandre-gerault.fr` | scholarsome, 4444 |
 | `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 |
 | `arbitrageffv.alexandre-gerault.fr` | arbitrage_ffv, 8000 |
-| `authelia.alexandre-gerault.fr` | authelia, 8098 — **not configured, the container restart-loops** |
+| `authelia.alexandre-gerault.fr` | authelia, 8098 |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
 ## Variables
@@ -61,7 +62,29 @@ The vault holds:
 | `vault_affine_db_password` | `compose_app` — affine's Postgres |
 | `vault_scholarsome_database_password`, `vault_scholarsome_jwt_secret` | `compose_app` — scholarsome |
 | `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
-| `vault_authelia_*` | kept as a backup; authelia has no role yet |
+| `vault_authelia_jwt_secret`, `vault_authelia_session_secret`, `vault_authelia_storage_encryption_key` | `authelia` |
+| `vault_authelia_users` | `authelia` — the file backend accounts, with argon2id hashes |
+
+## Putting a site behind the SSO
+
+Authelia protects nothing by default. Add `protect: true` to an entry of
+`caddy_sites` and re-run the `caddy` tag:
+
+```yaml
+  - name: penpot
+    domain: penpot.alexandre-gerault.fr
+    upstream_port: 9001
+    log: true
+    protect: true
+```
+
+Accounts live in `vault_authelia_users`. To add one, generate the hash with the
+image itself and put it in the vault:
+
+```bash
+docker run --rm ghcr.io/authelia/authelia:4.38 \
+  authelia crypto hash generate argon2 --password 'the-password'
+```
 
 ## Running it
 
@@ -113,9 +136,12 @@ Still open, because they change the running server rather than describe it:
    from the upstream sample compose file. It derives the session and invitation
    keys.
 3. **Jellyfin** runs as root inside its container.
-4. **Dead services.** authelia was never configured — its two config files are
-   the untouched 71KB upstream template — excalidraw is gone, and coolify is
-   installed with no container running. Their Caddy vhosts still resolve to
-   nothing.
-5. **No backups.** Nothing on this machine is backed up, which is what turned a
+4. **Dead services.** excalidraw is gone — it was started with `--rm` and did not
+   survive a reboot — and coolify is installed with no container running. Their
+   leftovers are the `excalidraw` vhost, the `coolify` docker network and
+   `/data/coolify`.
+5. **The legacy authelia stack** under `~/apps/authelia` is superseded by the
+   `authelia` role and can be deleted once the role has run; its secrets are in
+   the vault.
+6. **No backups.** Nothing on this machine is backed up, which is what turned a
    disk format into the loss of this repository.
