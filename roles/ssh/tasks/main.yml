@@ -63,14 +63,14 @@
     state: started
     enabled: true
 
-- name: Enable UFW with a deny-by-default policy
-  community.general.ufw:
-    state: enabled
-    policy: deny
-
 - name: Open the public ports
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
     proto: tcp
   loop: "{{ ssh_open_ports }}"
+
+- name: Enable UFW with a deny-by-default policy
+  community.general.ufw:
+    state: enabled
+    policy: deny
