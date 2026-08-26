@@ -30,14 +30,20 @@
     mode: "0700"
   loop: "{{ authorized_users }}"
 
+# Rendered from a template rather than an inline `content:` string. Building the
+# file with join() inside a YAML scalar put literal backslash-n sequences in it,
+# which sshd reads as one malformed key — with PasswordAuthentication off, that
+# locks everyone out.
 - name: Deploy the authorized_keys files
-  ansible.builtin.copy:
-    content: '{{ vault_ssh_authorized_keys[item] | join("\n") }}{{ "\n" }}'
-    dest: "/home/{{ item }}/.ssh/authorized_keys"
-    owner: "{{ item }}"
-    group: "{{ item }}"
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ user }}/.ssh/authorized_keys"
+    owner: "{{ user }}"
+    group: "{{ user }}"
     mode: "0600"
   loop: "{{ authorized_users }}"
+  loop_control:
+    loop_var: user
 
 - name: Install fail2ban and UFW
   ansible.builtin.apt:

@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+{% for key in vault_ssh_authorized_keys[user] %}
+{{ key }}
+{% endfor %}
