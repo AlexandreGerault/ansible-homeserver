@@ -88,23 +88,34 @@ ansible-vault edit group_vars/all/vault.yml         # edit the secrets
 
 ## Known gaps
 
-Tracked, deliberately out of scope of the catch-up, because they change the
-running server rather than describe it:
+Fixed in the repository, pending a real playbook run:
 
-1. **Published ports.** Every container port bound to `0.0.0.0` is reachable from
-   the internet. Docker writes its own iptables rules, so UFW never sees the traffic
-   and the reverse proxy is bypassed. Verified from outside on 2026-08-25: 3001,
-   3010, 4444, 8000, 8096, 8097 and 1080 all answer. Port 1080 is Penpot's
-   mailcatcher, which serves every mail the instance sends with no authentication.
-   They should all be bound to `127.0.0.1`.
-2. **fail2ban.** The Debian default jail watches port 22. sshd listens on 35123, so
-   nothing is actually being protected.
-3. **Leaked credentials.** The arbitrage_ffv `APP_KEY` and MySQL password were passed
-   on the command line and sit in `~/.bash_history`. They need rotating.
-4. **`AllowUsers`** still lists `alexandre`, an account that does not exist.
-5. **Jellyfin** runs as root inside its container.
-6. **Penpot** runs with the stock `PENPOT_SECRET_KEY: change-this-insecure-key` from
-   the upstream sample compose file. It derives the session and invitation keys.
-7. **Dead services.** authelia was never configured, excalidraw is gone, coolify is
-   installed with no container running.
-8. **No backups.** Nothing on this machine is backed up.
+- **Published ports.** Every container port is now bound to
+  `docker_publish_address` (`127.0.0.1`). They used to be on `0.0.0.0`: Docker
+  writes its own iptables rules, so UFW never saw the traffic and the reverse
+  proxy was bypassed. Verified from outside on 2026-08-25 — 3001, 3010, 4444,
+  8000, 8096, 8097 and 1080 all answered, 1080 being Penpot's mailcatcher, which
+  serves every mail the instance sends with no authentication. Jellyfin moves
+  from host to bridge networking for the same reason; that costs DLNA and client
+  auto-discovery on the LAN, recoverable with `jellyfin_network_mode: host`.
+- **fail2ban** was protecting nothing. Debian 12 ships no rsyslog and no
+  `/var/log/auth.log`, so the stock `backend = auto` found no log file, and the
+  stock `port = ssh` watched 22 while sshd listens on 35123. `jail.local` now
+  pins `backend = systemd` and the real port.
+- **`AllowUsers`** no longer lists `alexandre`, an account that does not exist.
+
+Still open, because they change the running server rather than describe it:
+
+1. **Leaked credentials.** The arbitrage_ffv `APP_KEY` and MySQL password were
+   passed on the command line and sit in `~/.bash_history`. They need rotating,
+   which means recreating the database user.
+2. **Penpot** runs with the stock `PENPOT_SECRET_KEY: change-this-insecure-key`
+   from the upstream sample compose file. It derives the session and invitation
+   keys.
+3. **Jellyfin** runs as root inside its container.
+4. **Dead services.** authelia was never configured — its two config files are
+   the untouched 71KB upstream template — excalidraw is gone, and coolify is
+   installed with no container running. Their Caddy vhosts still resolve to
+   nothing.
+5. **No backups.** Nothing on this machine is backed up, which is what turned a
+   disk format into the loss of this repository.

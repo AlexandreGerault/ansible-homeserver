@@ -14,10 +14,10 @@ ssh_port: 35123
 authorized_users:
   - alexandregerault
 
-# Extra names kept in sshd's AllowUsers directive. `alexandre` is a leftover:
-# the account does not exist in /etc/passwd. Removal is tracked as plan B4.
-ssh_extra_allowed_users:
-  - alexandre
+# Extra names kept in sshd's AllowUsers directive, for accounts that exist but
+# are not managed here. `alexandre` used to sit in this list without existing in
+# /etc/passwd, so it granted nothing; it has been dropped.
+ssh_extra_allowed_users: []
 
 docker_users:
   - alexandregerault
@@ -64,6 +64,12 @@ common_packages:
 # =============================================================================
 # Docker
 # =============================================================================
+# Address container ports are published on. Docker writes its own iptables
+# rules, so anything bound to 0.0.0.0 bypasses UFW entirely and is reachable
+# from the internet. Everything goes through Caddy, so nothing needs to listen
+# anywhere but the loopback.
+docker_publish_address: "127.0.0.1"
+
 docker_daemon_options:
   log-driver: json-file
   log-opts:
