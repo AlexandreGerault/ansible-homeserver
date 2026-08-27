@@ -111,16 +111,30 @@ ansible-vault edit group_vars/all/vault.yml         # edit the secrets
 
 ## Known gaps
 
-Fixed in the repository, pending a real playbook run:
+Fixed, applied and verified on the machine on 2026-08-26:
 
 - **Published ports.** Every container port is now bound to
   `docker_publish_address` (`127.0.0.1`). They used to be on `0.0.0.0`: Docker
   writes its own iptables rules, so UFW never saw the traffic and the reverse
-  proxy was bypassed. Verified from outside on 2026-08-25 — 3001, 3010, 4444,
-  8000, 8096, 8097 and 1080 all answered, 1080 being Penpot's mailcatcher, which
-  serves every mail the instance sends with no authentication. Jellyfin moves
-  from host to bridge networking for the same reason; that costs DLNA and client
-  auto-discovery on the LAN, recoverable with `jellyfin_network_mode: host`.
+  proxy was bypassed. Probing the public address from outside on 2026-08-25
+  answered on 3001, 3010, 4444, 8000, 8097 and 1080 — the last being Penpot's
+  mailcatcher, which serves every mail the instance sends, with no
+  authentication, including invitation and password reset links. Re-probing
+  after the run on 2026-08-26: all closed, only 80, 443 and the SSH port answer.
+
+  Jellyfin moves from host to bridge networking for the same reason. That costs
+  DLNA and client auto-discovery on the LAN, recoverable with
+  `jellyfin_network_mode: host`.
+
+  Correction to an earlier reading of that first probe: port 8096 was also
+  answering, and was attributed to this machine because Jellyfin was on host
+  networking at the time. It is not this machine. The router forwards 8096 to a
+  different host on the LAN — a machine reporting itself as `LOTUS`, running
+  Jellyfin 10.8.10, server id `72bf96976a8648b1a23002be41cda2cd`, against the
+  `51f68eec935b4f0084fc9b6c6717d39f` of the container here. It still answers on
+  the public address after the run. That host is outside the scope of this
+  repository, but an unproxied Jellyfin two years behind on patches is worth
+  looking at.
 - **fail2ban** was protecting nothing. Debian 12 ships no rsyslog and no
   `/var/log/auth.log`, so the stock `backend = auto` found no log file, and the
   stock `port = ssh` watched 22 while sshd listens on 35123. `jail.local` now
