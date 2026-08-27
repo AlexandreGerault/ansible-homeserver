@@ -1,0 +1,161 @@
+---
+# qBittorrent has no route to the internet of its own: it shares gluetun's
+# network namespace, and gluetun's firewall drops everything that is not the
+# tunnel. If the VPN goes down the client stops talking rather than falling back
+# to the bare connection. That is the whole point of the arrangement, so the two
+# containers are one compose project with a health condition between them —
+# `docker_container` with `network_mode: container:gluetun` gives no ordering
+# guarantee when gluetun is recreated.
+
+- name: Check the vault holds the VPN credentials
+  ansible.builtin.assert:
+    that:
+      - vault_qbittorrent_openvpn_config | default('') | length > 0
+      - vault_qbittorrent_openvpn_user | default('') | length > 0
+      - vault_qbittorrent_openvpn_password | default('') | length > 0
+      - vault_qbittorrent_password_pbkdf2 | default('') | length > 0
+    fail_msg: >-
+      Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_qbittorrent_openvpn_config (the whole .ovpn file),
+      vault_qbittorrent_openvpn_user, vault_qbittorrent_openvpn_password and
+      vault_qbittorrent_password_pbkdf2. See the README.
+    quiet: true
+
+# gluetun's firewall is up before OpenVPN starts, so the client cannot resolve
+# anything — a `remote` line naming a hostname never connects, and the failure
+# looks like a hang rather than a DNS error.
+- name: Check the OpenVPN remote is an IP address
+  ansible.builtin.assert:
+    that:
+      - qbittorrent_openvpn_remote is match('^([0-9]{1,3}\.){3}[0-9]{1,3}$')
+    fail_msg: >-
+      The `remote` line of vault_qbittorrent_openvpn_config points at
+      '{{ qbittorrent_openvpn_remote }}', which is not an IP address. Resolve it
+      (`dig +short {{ qbittorrent_openvpn_remote }}`) and put the address in the
+      vault instead: gluetun blocks DNS until the tunnel is up, so it can never
+      resolve that name itself.
+    quiet: true
+  vars:
+    # Block scalar so the regex reaches Jinja with its backslashes intact.
+    qbittorrent_openvpn_remote: >-
+      {{ (vault_qbittorrent_openvpn_config
+          | regex_search('(?m)^\s*remote\s+(\S+)', '\1')
+          | default([''], true))[0] }}
+
+- name: Create the qbittorrent service account
+  ansible.builtin.user:
+    name: "{{ qbittorrent_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: "{{ qbittorrent_config_dir }}"
+    groups: ["{{ qbittorrent_media_group }}"]
+    append: true
+  register: qbittorrent_account
+
+- name: Read the media group
+  ansible.builtin.group:
+    name: "{{ qbittorrent_media_group }}"
+  register: qbittorrent_media_group_state
+
+- name: Ensure the qbittorrent directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ qbittorrent_stack_dir }}"
+      mode: "0750"
+    - path: "{{ qbittorrent_stack_dir }}/secrets"
+      mode: "0700"
+    - path: "{{ qbittorrent_config_dir }}"
+      owner: "{{ qbittorrent_user }}"
+      group: "{{ qbittorrent_media_group }}"
+      mode: "0750"
+    - path: "{{ qbittorrent_config_dir }}/qBittorrent"
+      owner: "{{ qbittorrent_user }}"
+      group: "{{ qbittorrent_media_group }}"
+      mode: "0750"
+  loop_control:
+    label: "{{ item.path }}"
+
+# setgid so everything the client writes keeps the media group, and Jellyfin
+# reads finished downloads without a copy or a chown pass.
+- name: Prepare the download directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ qbittorrent_user }}"
+    group: "{{ qbittorrent_media_group }}"
+    mode: "2775"
+  loop:
+    - "{{ qbittorrent_downloads_dir }}"
+    - "{{ qbittorrent_downloads_dir }}/incomplete"
+    - "{{ qbittorrent_downloads_dir }}/complete"
+
+- name: Deploy the OpenVPN configuration
+  ansible.builtin.template:
+    src: custom.ovpn.j2
+    dest: "{{ qbittorrent_stack_dir }}/custom.ovpn"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  register: qbittorrent_ovpn_state
+
+# Passed as compose secrets rather than environment variables so they stay out
+# of `docker inspect` and the container's /proc/1/environ.
+- name: Deploy the OpenVPN credentials
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ qbittorrent_stack_dir }}/secrets/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - name: openvpn_user
+      value: "{{ vault_qbittorrent_openvpn_user }}"
+    - name: openvpn_password
+      value: "{{ vault_qbittorrent_openvpn_password }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  register: qbittorrent_secrets_state
+
+# Seeded, not managed: see qbittorrent_reset_config in the role defaults.
+- name: Seed the qBittorrent configuration
+  ansible.builtin.template:
+    src: qBittorrent.conf.j2
+    dest: "{{ qbittorrent_config_dir }}/qBittorrent/qBittorrent.conf"
+    owner: "{{ qbittorrent_user }}"
+    group: "{{ qbittorrent_media_group }}"
+    mode: "0600"
+    force: "{{ qbittorrent_reset_config }}"
+  no_log: true
+  register: qbittorrent_config_state
+
+- name: Deploy the compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ qbittorrent_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: qbittorrent_compose_state
+
+- name: Bring the qbittorrent stack up
+  community.docker.docker_compose_v2:
+    project_src: "{{ qbittorrent_stack_dir }}"
+    files: [compose.yml]
+    state: present
+    # Fail loudly if the tunnel never comes up, rather than hanging forever on
+    # a bad .ovpn — gluetun retries the connection indefinitely on its own.
+    wait: true
+    wait_timeout: "{{ qbittorrent_wait_timeout }}"
+    recreate: >-
+      {{ 'always' if (qbittorrent_compose_state.changed
+                      or qbittorrent_ovpn_state.changed
+                      or qbittorrent_secrets_state.changed
+                      or qbittorrent_config_state.changed) else 'auto' }}

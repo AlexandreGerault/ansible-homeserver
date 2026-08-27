@@ -71,6 +71,18 @@
     state: started
     enabled: true
 
+# Created here rather than by whichever compose project happens to run first:
+# jellyfin, qbittorrent, homepage and the *arr stack all attach to it, and a
+# network owned by one project disappears when that project is torn down.
+- name: Create the shared docker networks
+  community.docker.docker_network:
+    name: "{{ item.name }}"
+    ipam_config:
+      - subnet: "{{ item.subnet }}"
+  loop: "{{ docker_networks }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: Create the docker group
   ansible.builtin.group:
     name: docker

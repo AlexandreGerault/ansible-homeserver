@@ -1,0 +1,29 @@
+---
+# Lookup tables the configure tasks index by application name. They are here
+# rather than in defaults so they cannot be half-overridden: the port in
+# arr_apps and the port used to call the API must be the same number.
+arr_ports: >-
+  {{ dict(arr_apps | map(attribute='name') | zip(arr_apps | map(attribute='port'))) }}
+
+# Evaluated lazily, after the assert in tasks/main.yml has checked they exist.
+arr_api_keys:
+  prowlarr: "{{ vault_prowlarr_api_key | default('') }}"
+  sonarr: "{{ vault_sonarr_api_key | default('') }}"
+  radarr: "{{ vault_radarr_api_key | default('') }}"
+  bazarr: "{{ vault_bazarr_api_key | default('') }}"
+
+# Which field carries the qBittorrent category, per application. Sonarr and
+# Radarr each name it after what they manage; Prowlarr just calls it category.
+arr_download_clients:
+  - app: sonarr
+    api: v3
+    category_field: tvCategory
+    category: "{{ arr_sonarr_category }}"
+  - app: radarr
+    api: v3
+    category_field: movieCategory
+    category: "{{ arr_radarr_category }}"
+  - app: prowlarr
+    api: v1
+    category_field: category
+    category: "{{ arr_prowlarr_category }}"

@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+#
+# One compose project for the whole stack. Everything joins the shared media
+# network as its default, so the containers address each other by name —
+# http://sonarr:8989 rather than a round trip through Caddy, which would land on
+# Authelia and get a redirect instead of JSON.
+name: arr
+
+networks:
+  default:
+    name: {{ media_network }}
+    external: true
+
+services:
+{% for app in arr_apps %}
+  {{ app.name }}:
+    image: {{ app.image }}
+    container_name: {{ app.name }}
+    restart: unless-stopped
+    environment:
+      PUID: "{{ arr_account.uid }}"
+      PGID: "{{ arr_media_group_state.gid }}"
+      # Group-writable, so Jellyfin reads what lands in the libraries and
+      # Bazarr can drop a subtitle next to a file Sonarr imported.
+      UMASK: "002"
+      TZ: {{ common_timezone }}
+    volumes:
+      - {{ arr_config_dir }}/{{ app.name }}:/config
+{% if app.media %}
+      - {{ jellyfin_media_root }}:{{ arr_media_mount }}
+{% endif %}
+    ports:
+      - "{{ docker_publish_address }}:{{ app.port }}:{{ app.port }}/tcp"
+{% endfor %}
+
+  # Jellyseerr signs people in against Jellyfin, so it needs no PUID/PGID and no
+  # media mount: it only ever asks Sonarr and Radarr to fetch something.
+  jellyseerr:
+    image: {{ arr_jellyseerr_image }}
+    container_name: jellyseerr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      TZ: {{ common_timezone }}
+      PORT: "{{ arr_jellyseerr_port }}"
+    volumes:
+      - {{ arr_config_dir }}/jellyseerr:/app/config
+    ports:
+      - "{{ docker_publish_address }}:{{ arr_jellyseerr_port }}:{{ arr_jellyseerr_port }}/tcp"

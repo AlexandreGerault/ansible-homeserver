@@ -1,0 +1,54 @@
+---
+# Images are pinned: a torrent client that silently changes behaviour behind a
+# VPN killswitch is not something to discover after an unattended pull.
+qbittorrent_gluetun_image: qmcgaw/gluetun:v3.41.3
+qbittorrent_image: lscr.io/linuxserver/qbittorrent:5.2.3
+
+# Config lives in /etc and state in /var/lib, like authelia — not under
+# ~/apps with the other compose stacks. The OpenVPN file and the credentials
+# are root-only, and compose has to be able to read them.
+qbittorrent_stack_dir: /etc/qbittorrent
+qbittorrent_config_dir: /var/lib/qbittorrent
+qbittorrent_downloads_dir: "{{ jellyfin_media_root }}/downloads"
+
+# The whole media tree is mounted, not just the download directory, and at the
+# same path Sonarr and Radarr use. An import is then a hardlink from
+# /data/downloads/complete into /data/show: no copy, no second copy of the file
+# on disk, and the torrent keeps seeding from the same inode. It also means the
+# save path qBittorrent reports over its API is a path the *arr containers can
+# resolve, so none of them need a remote path mapping.
+qbittorrent_media_mount: /data
+qbittorrent_downloads_mount: "{{ qbittorrent_media_mount }}/{{ qbittorrent_downloads_dir | relpath(jellyfin_media_root) }}"
+
+# Shared network gluetun joins alongside its own, so Sonarr and Radarr can reach
+# the WebUI at gluetun:8080 without going through Caddy and Authelia.
+media_network: media
+media_network_subnet: 10.89.0.0/24
+
+# Published on the loopback and proxied by Caddy, like everything else.
+qbittorrent_webui_port: 8099
+qbittorrent_webui_domain: ""
+qbittorrent_webui_username: admin
+
+# The peer port qBittorrent listens on inside the tunnel. It is only reachable
+# if the provider forwards a port to you; put that port in
+# qbittorrent_vpn_input_ports for gluetun to let it through its firewall.
+qbittorrent_torrenting_port: 6881
+qbittorrent_vpn_input_ports: []
+
+# The container writes as this account, with the media group so Jellyfin can
+# read what lands in the download directory.
+qbittorrent_user: qbittorrent
+qbittorrent_media_group: jellyfin
+
+# qBittorrent rewrites qBittorrent.conf itself every time it exits, so the file
+# is seeded once and then left alone — whatever you change in the WebUI sticks.
+# Flip this to true for one run to make the template authoritative again.
+qbittorrent_reset_config: false
+
+# How long to wait for gluetun to report healthy, i.e. for the tunnel to be up.
+qbittorrent_wait_timeout: 180
+
+jellyfin_media_root: /var/jellyfin/media
+docker_publish_address: "127.0.0.1"
+common_timezone: Etc/UTC

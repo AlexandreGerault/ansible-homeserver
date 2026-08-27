@@ -1,0 +1,37 @@
+# {{ ansible_managed }}
+#
+# Seed only. qBittorrent rewrites this file wholesale every time it exits, so
+# Ansible writes it once and then keeps its hands off — set
+# qbittorrent_reset_config=true for one run to make this template win again.
+# Keys checked against qBittorrent 5.2.3.
+
+[LegalNotice]
+Accepted=true
+
+[BitTorrent]
+Session\DefaultSavePath={{ qbittorrent_downloads_mount }}/complete
+Session\TempPath={{ qbittorrent_downloads_mount }}/incomplete
+Session\TempPathEnabled=true
+Session\Port={{ qbittorrent_torrenting_port }}
+# Second line of defence behind gluetun's killswitch: bind the session to the
+# tunnel device, so a dropped VPN means no peer traffic even if the firewall
+# were somehow permissive. tun0 is gluetun's VPN_INTERFACE default.
+Session\Interface=tun0
+Session\InterfaceName=tun0
+
+[Preferences]
+WebUI\Enabled=true
+WebUI\Address=*
+WebUI\Port=8080
+WebUI\Username={{ qbittorrent_webui_username }}
+WebUI\Password_PBKDF2="{{ vault_qbittorrent_password_pbkdf2 }}"
+WebUI\LocalHostAuth=true
+WebUI\CSRFProtection=true
+WebUI\ClickjackingProtection=true
+# Caddy passes the original Host through, so validation stays on and only the
+# real vhost is accepted. Requests that reach the port with any other Host —
+# anything probing the loopback directly — are refused.
+WebUI\HostHeaderValidation=true
+WebUI\ServerDomains={{ qbittorrent_webui_domain }}
+WebUI\HTTPS\Enabled=false
+WebUI\UseUPnP=false

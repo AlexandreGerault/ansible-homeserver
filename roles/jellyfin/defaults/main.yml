@@ -3,5 +3,6 @@ jellyfin_users: []
 jellyfin_image: jellyfin/jellyfin
 jellyfin_media_root: /var/jellyfin/media
 jellyfin_media_libraries: []
-jellyfin_network_mode: bridge
+jellyfin_network_mode: "{{ media_network }}"
+media_network: media
 docker_publish_address: "127.0.0.1"

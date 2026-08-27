@@ -24,13 +24,16 @@
     group: jellyfin
     mode: "0750"
 
+# setgid: Sonarr and Radarr create the series and film directories in here as
+# the `arr` account, whose primary group is not jellyfin. Without the bit those
+# directories come out arr:arr and Jellyfin cannot descend into them.
 - name: Prepare the media libraries
   ansible.builtin.file:
     path: "{{ jellyfin_media_root }}/{{ item }}"
     state: directory
     owner: root
     group: jellyfin
-    mode: "0770"
+    mode: "2770"
   loop: "{{ jellyfin_media_libraries }}"
 
 # The container currently runs as root. Dropping it to the jellyfin account is
@@ -41,6 +44,11 @@
 # the only way in. The cost is DLNA and client auto-discovery on the LAN, which
 # need the host network stack; set jellyfin_network_mode back to `host` if you
 # ever want them.
+#
+# It sits on the shared media network rather than the default bridge so
+# Jellyseerr and the Homepage widget can call http://jellyfin:8096 directly.
+# Going round through Caddy would work for Jellyfin, but not for anything behind
+# Authelia, so the whole stack uses container names consistently.
 - name: Run the Jellyfin container
   community.docker.docker_container:
     name: jellyfin

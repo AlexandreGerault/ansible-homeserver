@@ -70,6 +70,14 @@ common_packages:
 # anywhere but the loopback.
 docker_publish_address: "127.0.0.1"
 
+# Shared network for the media stack. Jellyfin, Homepage, the *arr containers
+# and gluetun all join it, so they reach each other by container name instead of
+# through Caddy — Authelia sits in front of every vhost and would bounce an API
+# call. The subnet is pinned because gluetun's firewall needs it spelled out
+# before it will route replies back to a neighbouring docker network.
+media_network: media
+media_network_subnet: 10.89.0.0/24
+
 docker_daemon_options:
   log-driver: json-file
   log-opts:
@@ -116,6 +124,39 @@ caddy_sites:
     domain: scholarsome.alexandre-gerault.fr
     upstream_port: 4444
     log: true
+  - name: qbittorrent
+    domain: torrent.alexandre-gerault.fr
+    upstream_port: 8099
+    log: true
+    protect: true
+  - name: prowlarr
+    domain: prowlarr.alexandre-gerault.fr
+    upstream_port: 9696
+    log: true
+    protect: true
+  - name: sonarr
+    domain: sonarr.alexandre-gerault.fr
+    upstream_port: 8989
+    log: true
+    protect: true
+  - name: radarr
+    domain: radarr.alexandre-gerault.fr
+    upstream_port: 7878
+    log: true
+    protect: true
+  - name: bazarr
+    domain: bazarr.alexandre-gerault.fr
+    upstream_port: 6767
+    log: true
+    protect: true
+  # Jellyseerr authenticates against Jellyfin itself, so it is deliberately not
+  # behind Authelia: the people who are allowed to request a film already have a
+  # Jellyfin account, and putting the portal behind SSO would mean creating an
+  # Authelia account for each of them as well.
+  - name: jellyseerr
+    domain: requests.alexandre-gerault.fr
+    upstream_port: 5055
+    log: true
 
 # =============================================================================
 # Authelia — SSO. Add `protect: true` to a caddy_sites entry to put it behind
@@ -136,6 +177,40 @@ jellyfin_media_libraries:
   - movie
   - music
   - show
+
+# =============================================================================
+# qBittorrent — behind gluetun, which holds the OpenVPN tunnel and the killswitch
+# =============================================================================
+qbittorrent_webui_domain: torrent.alexandre-gerault.fr
+qbittorrent_webui_port: 8099
+qbittorrent_webui_username: admin
+qbittorrent_torrenting_port: 6881
+# Fill this in only if the VPN provider forwards a port to you, with the port it
+# gave you — it is what lets peers connect back in through the tunnel. Then set
+# the same port as Session\Port in the WebUI.
+qbittorrent_vpn_input_ports: []
+
+# =============================================================================
+# *arr stack — Prowlarr indexers feeding Sonarr and Radarr, Bazarr for the
+# subtitles, Jellyseerr as the request portal. All on the media network, all
+# mounting the media tree at the same path so imports are hardlinks.
+# =============================================================================
+arr_prowlarr_domain: prowlarr.alexandre-gerault.fr
+arr_sonarr_domain: sonarr.alexandre-gerault.fr
+arr_radarr_domain: radarr.alexandre-gerault.fr
+arr_bazarr_domain: bazarr.alexandre-gerault.fr
+arr_jellyseerr_domain: requests.alexandre-gerault.fr
+
+# Which library each application manages, as the containers see it. Sonarr gets
+# two root folders: pick the anime one when adding a series and set its type to
+# Anime, which is what switches it to absolute episode numbering.
+arr_root_folders:
+  - app: sonarr
+    path: /data/show
+  - app: sonarr
+    path: /data/anime
+  - app: radarr
+    path: /data/movie
 
 # =============================================================================
 # Homepage

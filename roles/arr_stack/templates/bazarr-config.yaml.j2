@@ -1,0 +1,38 @@
+# {{ ansible_managed }}
+#
+# Seed only, like the config.xml files: Bazarr rewrites this on every settings
+# change and fills in every key it does not find here. What is set below is the
+# part that is tedious to redo by hand — the API key and the two connections.
+#
+# The subtitle providers and languages are deliberately absent: they depend on
+# accounts you hold, so they are configured once in the web interface.
+auth:
+  type: null
+  apikey: {{ vault_bazarr_api_key }}
+general:
+  ip: 0.0.0.0
+  port: {{ (arr_apps | selectattr('name', 'eq', 'bazarr') | first).port }}
+  base_url: ''
+  use_sonarr: true
+  use_radarr: true
+  auto_update: false
+  branch: master
+  chmod_enabled: false
+  path_mappings: []
+  path_mappings_movie: []
+sonarr:
+  ip: sonarr
+  port: 8989
+  base_url: /
+  ssl: false
+  apikey: {{ vault_sonarr_api_key }}
+  full_update: Daily
+  only_monitored: false
+radarr:
+  ip: radarr
+  port: 7878
+  base_url: /
+  ssl: false
+  apikey: {{ vault_radarr_api_key }}
+  full_update: Daily
+  only_monitored: false

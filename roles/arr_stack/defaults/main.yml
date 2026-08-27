@@ -1,0 +1,90 @@
+---
+# Images are pinned. An unattended pull that changes how Sonarr renames files or
+# how Prowlarr syncs indexers is not something to discover from a broken library.
+arr_apps:
+  - name: prowlarr
+    image: lscr.io/linuxserver/prowlarr:2.5.2
+    port: 9696
+    # Prowlarr only talks to indexers and to the other applications; it never
+    # touches a file, so it does not get the media tree.
+    media: false
+    api: v1
+  - name: sonarr
+    image: lscr.io/linuxserver/sonarr:4.0.19
+    port: 8989
+    media: true
+    api: v3
+  - name: radarr
+    image: lscr.io/linuxserver/radarr:6.3.0
+    port: 7878
+    media: true
+    api: v3
+  - name: bazarr
+    image: lscr.io/linuxserver/bazarr:1.6.0
+    port: 6767
+    media: true
+    # Bazarr is not a Servarr fork: no config.xml, no /api/v3, its own YAML.
+    api: false
+
+# Not a linuxserver image and not PUID/PGID-aware, so it is declared apart from
+# the loop rather than bent into it.
+arr_jellyseerr_image: fallenbagel/jellyseerr:2.7.3
+arr_jellyseerr_port: 5055
+
+# Same split as qbittorrent: the compose project and its secrets in /etc, the
+# application state in /var/lib.
+arr_stack_dir: /etc/arr
+arr_config_dir: /var/lib/arr
+
+# The media tree as every container in the stack sees it — the same path
+# qbittorrent uses, which is what makes an import a hardlink instead of a copy.
+arr_media_mount: /data
+
+# The containers write as this account. It is in the jellyfin group so it can
+# read what qbittorrent left in the download directory and write into the
+# libraries; UMASK 002 keeps what it creates group-writable.
+arr_user: arr
+arr_media_group: jellyfin
+
+# qBittorrent lives in gluetun's network namespace, so its WebUI answers on the
+# gluetun container's name, not on a container called qbittorrent.
+arr_download_client_host: gluetun
+arr_download_client_port: 8080
+
+# Categories qBittorrent files the downloads under, one directory each below
+# the completed path. These are the names Sonarr and Radarr default to.
+arr_sonarr_category: tv-sonarr
+arr_radarr_category: radarr
+arr_prowlarr_category: prowlarr
+
+# Newznab/Torznab category ids Prowlarr forwards to each application. Without
+# them the sync pushes every indexer but no search category, and the
+# applications find nothing.
+arr_prowlarr_applications:
+  - name: Sonarr
+    port: 8989
+    categories: [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5090]
+  - name: Radarr
+    port: 7878
+    categories: [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080, 2090]
+
+arr_root_folders: []
+
+# config.xml and Bazarr's config.yaml are rewritten by the applications
+# themselves, so Ansible seeds them once and then leaves them alone. Flip this
+# to true for a single run to make the templates authoritative again — it
+# discards whatever was changed in the web interfaces.
+arr_reset_config: false
+
+# How long to wait for each API to answer before giving up on the wiring.
+arr_wait_retries: 40
+arr_wait_delay: 5
+
+# Set to false to bring the containers up without touching their settings over
+# the API — useful when you want to wire something by hand.
+arr_configure: true
+
+jellyfin_media_root: /var/jellyfin/media
+media_network: media
+docker_publish_address: "127.0.0.1"
+common_timezone: Etc/UTC

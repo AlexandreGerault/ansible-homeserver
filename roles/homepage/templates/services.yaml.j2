@@ -15,3 +15,58 @@
         icon: mdi-sail-boat
         description: Application de gestion des inspections de bateaux
         container: arbitrage_ffv_app
+    - Jellyseerr:
+        href: https://{{ arr_jellyseerr_domain }}
+        icon: jellyseerr.png
+        description: Demander un film ou une série
+        container: jellyseerr
+
+# Les widgets appellent les conteneurs par leur nom sur le réseau media : passer
+# par les vhosts publics ferait répondre Authelia à la place de l'API.
+- Téléchargement:
+    - qBittorrent:
+        href: https://{{ qbittorrent_webui_domain }}
+        icon: qbittorrent.png
+        description: Client torrent, derrière le VPN
+        container: qbittorrent
+        widget:
+            type: qbittorrent
+            url: http://gluetun:8080
+            username: {{ qbittorrent_webui_username }}
+            password: {{ vault_qbittorrent_webui_password }}
+    - Prowlarr:
+        href: https://{{ arr_prowlarr_domain }}
+        icon: prowlarr.png
+        description: Indexeurs, synchronisés vers Sonarr et Radarr
+        container: prowlarr
+        widget:
+            type: prowlarr
+            url: http://prowlarr:9696
+            key: {{ vault_prowlarr_api_key }}
+    - Sonarr:
+        href: https://{{ arr_sonarr_domain }}
+        icon: sonarr.png
+        description: Séries et animes
+        container: sonarr
+        widget:
+            type: sonarr
+            url: http://sonarr:8989
+            key: {{ vault_sonarr_api_key }}
+    - Radarr:
+        href: https://{{ arr_radarr_domain }}
+        icon: radarr.png
+        description: Films
+        container: radarr
+        widget:
+            type: radarr
+            url: http://radarr:7878
+            key: {{ vault_radarr_api_key }}
+    - Bazarr:
+        href: https://{{ arr_bazarr_domain }}
+        icon: bazarr.png
+        description: Sous-titres
+        container: bazarr
+        widget:
+            type: bazarr
+            url: http://bazarr:6767
+            key: {{ vault_bazarr_api_key }}

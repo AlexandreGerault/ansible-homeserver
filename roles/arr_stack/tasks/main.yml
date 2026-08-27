@@ -1,0 +1,125 @@
+---
+# Prowlarr holds the indexers and pushes them to Sonarr and Radarr; those two
+# hand releases to qBittorrent and import what comes back; Bazarr fetches the
+# subtitles; Jellyseerr is the front door for requests. They only work as a set,
+# so they are one compose project rather than five roles.
+#
+# The wiring between them — root folders, download client, Prowlarr's
+# application list — is done over each application's API rather than by writing
+# their databases: config.xml holds almost nothing, and everything that matters
+# lives in a SQLite file no template can safely touch.
+
+- name: Check the vault holds the *arr secrets
+  ansible.builtin.assert:
+    that:
+      - vault_prowlarr_api_key | default('') | length >= 32
+      - vault_sonarr_api_key | default('') | length >= 32
+      - vault_radarr_api_key | default('') | length >= 32
+      - vault_bazarr_api_key | default('') | length >= 32
+      - vault_qbittorrent_webui_password | default('') | length > 0
+    fail_msg: >-
+      Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_prowlarr_api_key, vault_sonarr_api_key, vault_radarr_api_key and
+      vault_bazarr_api_key — 32 hex characters each, from
+      `python3 -c 'import secrets; print(secrets.token_hex(16))'` — plus
+      vault_qbittorrent_webui_password, the WebUI password in clear, which is
+      what Sonarr and Radarr log in to the download client with. See the README.
+    quiet: true
+
+- name: Create the arr service account
+  ansible.builtin.user:
+    name: "{{ arr_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: "{{ arr_config_dir }}"
+    groups: ["{{ arr_media_group }}"]
+    append: true
+  register: arr_account
+
+- name: Read the media group
+  ansible.builtin.group:
+    name: "{{ arr_media_group }}"
+  register: arr_media_group_state
+
+- name: Ensure the stack directory exists
+  ansible.builtin.file:
+    path: "{{ arr_stack_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# `bazarr/config` last, after its own parent: the file module creates missing
+# parents but does not apply owner or mode to them.
+- name: Ensure the configuration directories exist
+  ansible.builtin.file:
+    path: "{{ arr_config_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ arr_user }}"
+    group: "{{ arr_media_group }}"
+    mode: "0750"
+  loop: >-
+    {{ [''] + (arr_apps | map(attribute='name') | list) + ['bazarr/config'] }}
+  loop_control:
+    label: "{{ arr_config_dir }}/{{ item }}"
+
+# Jellyseerr is not a linuxserver image: it runs as root, honours no PUID, and
+# chowns nothing, so its directory is root's rather than the arr account's.
+- name: Ensure the jellyseerr directory exists
+  ansible.builtin.file:
+    path: "{{ arr_config_dir }}/jellyseerr"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# Seeded, not managed: see arr_reset_config in the role defaults.
+- name: Seed the Servarr configuration
+  ansible.builtin.template:
+    src: config.xml.j2
+    dest: "{{ arr_config_dir }}/{{ app.name }}/config.xml"
+    owner: "{{ arr_user }}"
+    group: "{{ arr_media_group }}"
+    mode: "0640"
+    force: "{{ arr_reset_config }}"
+  loop: "{{ arr_apps | selectattr('api') | list }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  no_log: true
+  register: arr_config_state
+
+- name: Seed the Bazarr configuration
+  ansible.builtin.template:
+    src: bazarr-config.yaml.j2
+    dest: "{{ arr_config_dir }}/bazarr/config/config.yaml"
+    owner: "{{ arr_user }}"
+    group: "{{ arr_media_group }}"
+    mode: "0640"
+    force: "{{ arr_reset_config }}"
+  no_log: true
+  register: arr_bazarr_config_state
+
+- name: Deploy the compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ arr_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: arr_compose_state
+
+- name: Bring the arr stack up
+  community.docker.docker_compose_v2:
+    project_src: "{{ arr_stack_dir }}"
+    files: [compose.yml]
+    state: present
+    recreate: >-
+      {{ 'always' if (arr_compose_state.changed
+                      or arr_config_state.changed
+                      or arr_bazarr_config_state.changed) else 'auto' }}
+
+- name: Configure the applications over their APIs
+  ansible.builtin.include_tasks: configure.yml
+  when: arr_configure | bool

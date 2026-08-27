@@ -1,0 +1,76 @@
+# {{ ansible_managed }}
+#
+# qbittorrent has no network of its own: `network_mode: service:gluetun` puts it
+# in gluetun's namespace, where the only route out is the tunnel. The WebUI is
+# therefore published on the gluetun container, not on this one.
+name: qbittorrent
+
+networks:
+  # gluetun's own bridge, where qbittorrent lives with it.
+  default:
+  # Shared with jellyfin and the *arr stack. gluetun joins it so Sonarr and
+  # Radarr can drive the WebUI by name; qbittorrent inherits the namespace and
+  # therefore the reachability, without gaining a route out of the tunnel.
+  media:
+    name: {{ media_network }}
+    external: true
+
+services:
+  gluetun:
+    image: {{ qbittorrent_gluetun_image }}
+    container_name: gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: custom
+      VPN_TYPE: openvpn
+      OPENVPN_CUSTOM_CONFIG: /gluetun/custom.ovpn
+      TZ: {{ common_timezone }}
+      # Without this the killswitch drops the *arr containers' traffic too:
+      # gluetun's firewall only routes replies back to subnets it has been told
+      # about, and the media network is not one it discovers on its own.
+      FIREWALL_OUTBOUND_SUBNETS: "{{ media_network_subnet }}"
+{% if qbittorrent_vpn_input_ports %}
+      # Peer port forwarded by the provider, opened on the tunnel side.
+      FIREWALL_VPN_INPUT_PORTS: "{{ qbittorrent_vpn_input_ports | join(',') }}"
+{% endif %}
+    secrets:
+      - openvpn_user
+      - openvpn_password
+    volumes:
+      - {{ qbittorrent_stack_dir }}/custom.ovpn:/gluetun/custom.ovpn:ro
+    networks:
+      - default
+      - media
+    ports:
+      # WebUI of the container below, reachable only through Caddy.
+      - "{{ docker_publish_address }}:{{ qbittorrent_webui_port }}:8080/tcp"
+
+  qbittorrent:
+    image: {{ qbittorrent_image }}
+    container_name: qbittorrent
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      PUID: "{{ qbittorrent_account.uid }}"
+      PGID: "{{ qbittorrent_media_group_state.gid }}"
+      # Finished files land group-writable so Jellyfin picks them up in place.
+      UMASK: "002"
+      TZ: {{ common_timezone }}
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: "{{ qbittorrent_torrenting_port }}"
+    volumes:
+      - {{ qbittorrent_config_dir }}:/config
+      - {{ jellyfin_media_root }}:{{ qbittorrent_media_mount }}
+
+secrets:
+  openvpn_user:
+    file: {{ qbittorrent_stack_dir }}/secrets/openvpn_user
+  openvpn_password:
+    file: {{ qbittorrent_stack_dir }}/secrets/openvpn_password

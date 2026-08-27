@@ -1,0 +1,30 @@
+<!-- {{ ansible_managed }} -->
+<!--
+  Seed only: Prowlarr, Sonarr and Radarr rewrite this file themselves, so
+  Ansible writes it once. Set arr_reset_config=true for one run to make it win
+  again.
+
+  AuthenticationMethod is External, meaning the application does no login of its
+  own and trusts whatever is in front of it. That front is Caddy with Authelia,
+  and the port is published on the loopback only, so the practical consequence
+  is that anyone with a shell on the host can reach the API unauthenticated —
+  which is already true of the docker socket.
+-->
+<Config>
+  <BindAddress>*</BindAddress>
+  <Port>{{ app.port }}</Port>
+  <SslPort>{{ app.port + 1 }}</SslPort>
+  <EnableSsl>False</EnableSsl>
+  <LaunchBrowser>False</LaunchBrowser>
+  <ApiKey>{{ lookup('vars', 'vault_' ~ app.name ~ '_api_key') }}</ApiKey>
+  <AuthenticationMethod>External</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <Branch>master</Branch>
+  <LogLevel>info</LogLevel>
+  <SslCertPath></SslCertPath>
+  <SslCertPassword></SslCertPassword>
+  <UrlBase></UrlBase>
+  <InstanceName>{{ app.name | capitalize }}</InstanceName>
+  <UpdateMechanism>Docker</UpdateMechanism>
+  <AnalyticsEnabled>False</AnalyticsEnabled>
+</Config>

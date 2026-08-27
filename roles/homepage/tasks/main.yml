@@ -46,12 +46,16 @@
     mode: "0644"
   notify: Restart homepage
 
+# On the media network rather than the default bridge: the widgets are fetched
+# by the container itself, so they call http://sonarr:8989 directly. Going out
+# through the public vhost would hit Authelia and get a login page back.
 - name: Run the homepage container
   community.docker.docker_container:
     name: homepage
     image: "{{ homepage_image }}"
     state: started
     restart_policy: unless-stopped
+    network_mode: "{{ media_network }}"
     ports:
       - "{{ docker_publish_address }}:{{ homepage_port }}:3000"
     mounts:

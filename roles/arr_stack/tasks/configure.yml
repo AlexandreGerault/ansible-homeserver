@@ -1,0 +1,153 @@
+---
+# Everything here is read-then-write: each task asks the application what it
+# already has and only posts what is missing, so a re-run is a no-op and
+# anything changed by hand in the web interface survives.
+#
+# To skip the whole file and wire the applications yourself:
+#   ansible-playbook playbook.yml -K --tags arr -e arr_configure=false
+
+# /ping needs no API key, which keeps this task readable when it times out —
+# every task below has to hide its body.
+- name: Wait for the applications to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ app.port }}/ping"
+    status_code: [200]
+  register: arr_ping
+  until: arr_ping is succeeded
+  retries: "{{ arr_wait_retries }}"
+  delay: "{{ arr_wait_delay }}"
+  loop: "{{ arr_apps | selectattr('api') | list }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+
+# -----------------------------------------------------------------------------
+# Root folders — where Sonarr and Radarr put what they import
+# -----------------------------------------------------------------------------
+- name: Read the root folders already configured
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports[arr_app] }}/api/v3/rootfolder"
+    headers:
+      X-Api-Key: "{{ arr_api_keys[arr_app] }}"
+  register: arr_root_folder_state
+  loop: "{{ arr_root_folders | map(attribute='app') | unique | list }}"
+  loop_control:
+    loop_var: arr_app
+  no_log: true
+
+- name: Add the missing root folders
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports[item.app] }}/api/v3/rootfolder"
+    method: POST
+    headers:
+      X-Api-Key: "{{ arr_api_keys[item.app] }}"
+    body_format: json
+    body:
+      path: "{{ item.path }}"
+    status_code: [200, 201]
+  loop: "{{ arr_root_folders }}"
+  loop_control:
+    label: "{{ item.app }} {{ item.path }}"
+  when: >-
+    item.path not in ((arr_root_folder_state.results
+                       | selectattr('arr_app', 'eq', item.app)
+                       | first).json | map(attribute='path') | list)
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Download client — qBittorrent, reached at gluetun's name because it lives in
+# gluetun's network namespace and has no interface of its own.
+# -----------------------------------------------------------------------------
+- name: Read the download clients already configured
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports[client.app] }}/api/{{ client.api }}/downloadclient"
+    headers:
+      X-Api-Key: "{{ arr_api_keys[client.app] }}"
+  register: arr_download_client_state
+  loop: "{{ arr_download_clients }}"
+  loop_control:
+    loop_var: client
+    label: "{{ client.app }}"
+  no_log: true
+
+# forceSave skips the connection test. Without it this task fails whenever the
+# VPN tunnel happens to be down, which would make the whole stack's deployment
+# depend on gluetun being healthy — it does not need to be.
+- name: Add qBittorrent as the download client
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports[item.client.app] }}/api/{{ item.client.api }}/downloadclient?forceSave=true"
+    method: POST
+    headers:
+      X-Api-Key: "{{ arr_api_keys[item.client.app] }}"
+    body_format: json
+    body:
+      enable: true
+      protocol: torrent
+      priority: 1
+      name: qBittorrent
+      implementation: QBittorrent
+      configContract: QBittorrentSettings
+      fields:
+        - name: host
+          value: "{{ arr_download_client_host }}"
+        - name: port
+          value: "{{ arr_download_client_port | int }}"
+        - name: useSsl
+          value: false
+        - name: urlBase
+          value: ""
+        - name: username
+          value: "{{ qbittorrent_webui_username }}"
+        - name: password
+          value: "{{ vault_qbittorrent_webui_password }}"
+        - name: "{{ item.client.category_field }}"
+          value: "{{ item.client.category }}"
+    status_code: [200, 201]
+  loop: "{{ arr_download_client_state.results }}"
+  loop_control:
+    label: "{{ item.client.app }}"
+  when: "'qBittorrent' not in (item.json | map(attribute='name') | list)"
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Prowlarr → Sonarr and Radarr. Registering them here is what makes Prowlarr
+# push every indexer it holds into both, and keep them in sync afterwards.
+# -----------------------------------------------------------------------------
+- name: Read the applications Prowlarr already syncs to
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports.prowlarr }}/api/v1/applications"
+    headers:
+      X-Api-Key: "{{ arr_api_keys.prowlarr }}"
+  register: arr_prowlarr_app_state
+  no_log: true
+
+- name: Register the applications with Prowlarr
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arr_ports.prowlarr }}/api/v1/applications?forceSave=true"
+    method: POST
+    headers:
+      X-Api-Key: "{{ arr_api_keys.prowlarr }}"
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      syncLevel: fullSync
+      implementation: "{{ item.name }}"
+      configContract: "{{ item.name }}Settings"
+      fields:
+        # The URL Prowlarr tells the application to call back on. It has to be
+        # the container name: the application resolves it on the media network,
+        # and the public vhost would land on Authelia.
+        - name: prowlarrUrl
+          value: "http://prowlarr:{{ arr_ports.prowlarr }}"
+        - name: baseUrl
+          value: "http://{{ item.name | lower }}:{{ item.port }}"
+        - name: apiKey
+          value: "{{ arr_api_keys[item.name | lower] }}"
+        - name: syncCategories
+          value: "{{ item.categories }}"
+    status_code: [200, 201]
+  loop: "{{ arr_prowlarr_applications }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: "item.name not in (arr_prowlarr_app_state.json | map(attribute='name') | list)"
+  no_log: true

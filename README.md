@@ -24,6 +24,8 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `docker` | Docker CE from the upstream deb822 repository, `daemon.json`, the `docker` group |
 | `caddy` | Reverse proxy: main `Caddyfile` plus one vhost file per site, generated from `caddy_sites` |
 | `jellyfin` | Media account, media libraries, the Jellyfin container |
+| `qbittorrent` | The torrent client and the gluetun container that holds its VPN tunnel |
+| `arr_stack` | Prowlarr, Sonarr, Radarr, Bazarr and Jellyseerr, plus the wiring between them |
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
 | `authelia` | The SSO portal: configuration, users database, secrets, container |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
@@ -41,6 +43,12 @@ Services reachable from the outside, all proxied by Caddy:
 | `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 |
 | `arbitrageffv.alexandre-gerault.fr` | arbitrage_ffv, 8000 |
 | `authelia.alexandre-gerault.fr` | authelia, 8098 |
+| `torrent.alexandre-gerault.fr` | qbittorrent, 8099 — **behind the SSO** |
+| `prowlarr.alexandre-gerault.fr` | prowlarr, 9696 — **behind the SSO** |
+| `sonarr.alexandre-gerault.fr` | sonarr, 8989 — **behind the SSO** |
+| `radarr.alexandre-gerault.fr` | radarr, 7878 — **behind the SSO** |
+| `bazarr.alexandre-gerault.fr` | bazarr, 6767 — **behind the SSO** |
+| `requests.alexandre-gerault.fr` | jellyseerr, 5055 — authenticates against Jellyfin instead |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
 ## Variables
@@ -64,6 +72,19 @@ The vault holds:
 | `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
 | `vault_authelia_jwt_secret`, `vault_authelia_session_secret`, `vault_authelia_storage_encryption_key` | `authelia` |
 | `vault_authelia_users` | `authelia` — the file backend accounts, with argon2id hashes |
+| `vault_qbittorrent_openvpn_config` | `qbittorrent` — the whole `.ovpn` file, as a block scalar |
+| `vault_qbittorrent_openvpn_user`, `vault_qbittorrent_openvpn_password` | `qbittorrent` — the VPN account |
+| `vault_qbittorrent_password_pbkdf2` | `qbittorrent` — the WebUI password, PBKDF2 |
+| `vault_qbittorrent_webui_password` | `arr_stack` and `homepage` — the same WebUI password in clear, which is what Sonarr and Radarr log in with |
+| `vault_prowlarr_api_key`, `vault_sonarr_api_key`, `vault_radarr_api_key`, `vault_bazarr_api_key` | `arr_stack` and `homepage` — 32 hex characters each |
+
+The four *arr keys are yours to pick rather than the applications': generating
+them here is what lets the playbook wire Prowlarr to Sonarr and Radarr, and lets
+the Homepage widgets work, instead of leaving both as a manual first-run step.
+
+```bash
+python3 -c 'import secrets; print(secrets.token_hex(16))'
+```
 
 ## Putting a site behind the SSO
 
@@ -85,6 +106,196 @@ image itself and put it in the vault:
 docker run --rm ghcr.io/authelia/authelia:4.38 \
   authelia crypto hash generate argon2 --password 'the-password'
 ```
+
+## The torrent client and its VPN
+
+qBittorrent has no network interface of its own. It runs with
+`network_mode: service:gluetun`, inside the network namespace of a
+[gluetun](https://github.com/qdm12/gluetun) container that holds the OpenVPN
+tunnel and a firewall that drops everything not going through it. If the VPN
+drops, the client loses the internet instead of falling back to the bare
+connection — that is the point of the arrangement, and it is why the two are one
+compose project in `/etc/qbittorrent` rather than two `docker_container` tasks:
+only compose gives an ordering guarantee when gluetun is recreated.
+
+The WebUI is published by the *gluetun* container (`127.0.0.1:8099`), because
+that is where the network stack lives, and it is proxied by Caddy with
+`protect: true`, so it sits behind Authelia.
+
+Downloads land in `/var/jellyfin/media/downloads/{incomplete,complete}`, written
+by a `qbittorrent` service account in the `jellyfin` group with `UMASK=002`, on
+setgid directories. Finished files are readable by Jellyfin where they are —
+point a library at `complete` and nothing needs copying or chowning.
+
+### Filling the vault
+
+Four secrets, none of which the role can invent:
+
+```bash
+ansible-vault edit group_vars/all/vault.yml
+```
+
+```yaml
+vault_qbittorrent_openvpn_user: your-vpn-username
+vault_qbittorrent_openvpn_password: your-vpn-password
+vault_qbittorrent_password_pbkdf2: "@ByteArray(...)"
+vault_qbittorrent_openvpn_config: |
+  client
+  dev tun
+  proto udp
+  remote 203.0.113.7 1194
+  ...
+```
+
+**The `remote` line must name an IP address, not a hostname.** gluetun raises its
+firewall before OpenVPN starts, so it can never resolve that name — the symptom
+is a container that hangs rather than a DNS error. Resolve it yourself
+(`dig +short vpn.example.com`) and put the address in the vault. The role
+asserts this before deploying anything. Any `ca`/`cert`/`key` line must be
+inlined as a `<ca>...</ca>` block too: gluetun rewrites the file elsewhere, so
+relative paths break.
+
+The WebUI password is stored the way qBittorrent stores it, PBKDF2-HMAC-SHA512
+over 100000 iterations:
+
+```bash
+python3 -c '
+import base64, hashlib, os, getpass
+p = getpass.getpass().encode()
+s = os.urandom(16)
+h = hashlib.pbkdf2_hmac("sha512", p, s, 100000)
+print("@ByteArray(" + base64.b64encode(s).decode() + ":" + base64.b64encode(h).decode() + ")")
+'
+```
+
+### Checking the tunnel actually holds
+
+```bash
+# the public address gluetun sees — must be the VPN's, not the ISP's
+docker exec gluetun wget -qO- http://127.0.0.1:8000/v1/publicip/ip
+
+# the same, from inside the torrent client
+docker exec qbittorrent curl -s https://ipinfo.io/ip
+```
+
+Both must return the VPN address. If the second one returns anything at all
+while gluetun is stopped, the namespace sharing is broken.
+
+### What Ansible does *not* manage
+
+`qBittorrent.conf` is rewritten wholesale by qBittorrent every time it exits, so
+Ansible seeds it once and then leaves it alone: whatever you change in the WebUI
+sticks. The seed sets the save paths, the WebUI credentials, host header
+validation for the vhost, and binds the session to `tun0` as a second killswitch
+under gluetun's. To make the template authoritative again for one run:
+
+```bash
+ansible-playbook playbook.yml -K --tags qbittorrent -e qbittorrent_reset_config=true
+```
+
+Incoming peer connections only work if the provider forwards a port. When it
+does, put that port in `qbittorrent_vpn_input_ports` so gluetun opens it on the
+tunnel side, and set the same port as the listening port in the WebUI.
+
+## The *arr stack
+
+Five containers in one compose project (`/etc/arr/compose.yml`), each with its
+state under `/var/lib/arr/<app>`:
+
+| Application | Does what |
+| --- | --- |
+| Prowlarr | Holds the indexers and pushes them into Sonarr and Radarr |
+| Sonarr | Series and anime — two root folders, `/data/show` and `/data/anime` |
+| Radarr | Films — `/data/movie` |
+| Bazarr | Subtitles for whatever Sonarr and Radarr imported |
+| Jellyseerr | Request portal, signed in against Jellyfin |
+
+### Why they all mount `/data`
+
+Every container that touches a file — qBittorrent included — mounts the whole
+media tree at `/data`, not just the directory it cares about. Two things follow
+from that, and both matter:
+
+- **Imports are hardlinks.** Sonarr links `/data/downloads/complete/…` into
+  `/data/show/…` instead of copying it. The file is not duplicated on disk and
+  the torrent keeps seeding from the same inode. A hardlink cannot cross a mount
+  point, so splitting this into `/downloads` and `/tv` would silently turn every
+  import into a full copy.
+- **No remote path mapping.** The save path qBittorrent reports over its API is a
+  path Sonarr can open, because it is the same path.
+
+```
+/var/jellyfin/media        ->  /data in every container
+├── downloads/
+│   ├── incomplete/
+│   └── complete/          <- qBittorrent writes here, under a category directory
+├── anime/                 <- Sonarr, root folder #2
+├── movie/                 <- Radarr
+├── music/
+└── show/                  <- Sonarr, root folder #1
+```
+
+Permissions hold this together: the containers run as the `arr` account, which
+is in the `jellyfin` group, with `UMASK=002`. The library directories are setgid
+so the directories Sonarr creates keep the `jellyfin` group rather than falling
+back to `arr`.
+
+### The shared network
+
+`media` is a docker network created by the `docker` role, not by any compose
+project — a network owned by one project vanishes when that project is torn
+down. Jellyfin, Homepage, the five *arr containers and gluetun all join it, and
+address each other by container name.
+
+They have to. Every vhost above is behind Authelia, so an API call sent to the
+public address gets a login redirect, not JSON. `http://sonarr:8989` gets JSON.
+
+gluetun is the awkward one: qBittorrent lives in its network namespace, so the
+WebUI answers on the name `gluetun`, not `qbittorrent`. gluetun also needs
+`FIREWALL_OUTBOUND_SUBNETS` set to the `media` subnet, otherwise its killswitch
+drops the replies to Sonarr along with everything else.
+
+### Authentication
+
+The three Servarr applications are seeded with `AuthenticationMethod=External`:
+they do no login of their own and trust what is in front of them, which is Caddy
+with Authelia. Their ports are published on the loopback only, so the practical
+consequence is that anyone with a shell on the host can reach the API without
+authenticating — which is already true of the docker socket.
+
+Jellyseerr is deliberately **not** behind Authelia. It signs people in against
+Jellyfin, so the people you have already given a Jellyfin account can request a
+film without you also creating an Authelia account for each of them.
+
+### What Ansible wires, and what it does not
+
+The API keys are generated by you and kept in the vault, which is what lets the
+playbook do the wiring instead of leaving it as a first-run checklist. On every
+run it reads what each application already has and posts only what is missing:
+
+- Sonarr's two root folders and Radarr's one.
+- qBittorrent as the download client in Sonarr, Radarr and Prowlarr, pointed at
+  `gluetun:8080` with a category each.
+- Sonarr and Radarr registered as applications in Prowlarr, with the Torznab
+  category ids, so indexers sync into both automatically.
+
+Re-running is a no-op, and anything you change in a web interface survives.
+`config.xml` and Bazarr's `config.yaml` are seeded once and then left alone,
+like `qBittorrent.conf`; to make the templates authoritative again for one run:
+
+```bash
+ansible-playbook playbook.yml -K --tags arr -e arr_reset_config=true
+```
+
+To bring the containers up and wire them yourself instead:
+
+```bash
+ansible-playbook playbook.yml -K --tags arr -e arr_configure=false
+```
+
+Left to the web interfaces, because it depends on accounts you hold or on taste:
+the indexers in Prowlarr, the subtitle providers and languages in Bazarr, the
+quality profiles, and Jellyseerr's first-run wizard.
 
 ## Running it
 
