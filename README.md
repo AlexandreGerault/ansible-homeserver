@@ -72,8 +72,8 @@ The vault holds:
 | `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
 | `vault_authelia_jwt_secret`, `vault_authelia_session_secret`, `vault_authelia_storage_encryption_key` | `authelia` |
 | `vault_authelia_users` | `authelia` — the file backend accounts, with argon2id hashes |
-| `vault_qbittorrent_openvpn_config` | `qbittorrent` — the whole `.ovpn` file, as a block scalar |
-| `vault_qbittorrent_openvpn_user`, `vault_qbittorrent_openvpn_password` | `qbittorrent` — the VPN account |
+| `vault_qbittorrent_openvpn_user`, `vault_qbittorrent_openvpn_password` | `qbittorrent` — the CyberGhost manual-configuration credentials, not the account login |
+| `vault_qbittorrent_openvpn_cert`, `vault_qbittorrent_openvpn_key` | `qbittorrent` — the `client.crt` and `client.key` of the same manual configuration, as PEM block scalars |
 | `vault_qbittorrent_password_pbkdf2` | `qbittorrent` — the WebUI password, PBKDF2 |
 | `vault_qbittorrent_webui_password` | `arr_stack` and `homepage` — the same WebUI password in clear, which is what Sonarr and Radarr log in with |
 | `vault_prowlarr_api_key`, `vault_sonarr_api_key`, `vault_radarr_api_key`, `vault_bazarr_api_key` | `arr_stack` and `homepage` — 32 hex characters each |
@@ -118,6 +118,11 @@ connection — that is the point of the arrangement, and it is why the two are o
 compose project in `/etc/qbittorrent` rather than two `docker_container` tasks:
 only compose gives an ordering guarantee when gluetun is recreated.
 
+The tunnel goes to **CyberGhost**, over OpenVPN, through the provider gluetun
+has built in. That is worth stating because it decides two things: the exit
+country is a variable rather than a downloaded `.ovpn`
+(`qbittorrent_vpn_server_countries`), and there is no forwarded port, ever.
+
 The WebUI is published by the *gluetun* container (`127.0.0.1:8099`), because
 that is where the network stack lives, and it is proxied by Caddy with
 `protect: true`, so it sits behind Authelia.
@@ -129,31 +134,41 @@ point a library at `complete` and nothing needs copying or chowning.
 
 ### Filling the vault
 
-Four secrets, none of which the role can invent:
+The provider is CyberGhost, over OpenVPN. gluetun knows it natively — it carries
+the server list and the CyberGhost root CA — so there is no `.ovpn` file to keep
+in the vault and no hostname to resolve by hand; the country to exit from is
+plain configuration, in `qbittorrent_vpn_server_countries`.
+
+What it cannot invent is the account. CyberGhost authenticates a manual OpenVPN
+client with a username and password *and* a client certificate and key, and all
+four come from the same "manual configuration" in the dashboard — the username
+and password there are **not** the account login. `TODO-qbittorrent.md` walks
+through where to click and how to split the downloaded ZIP into the four keys.
 
 ```bash
 ansible-vault edit group_vars/all/vault.yml
 ```
 
 ```yaml
-vault_qbittorrent_openvpn_user: your-vpn-username
-vault_qbittorrent_openvpn_password: your-vpn-password
-vault_qbittorrent_password_pbkdf2: "@ByteArray(...)"
-vault_qbittorrent_openvpn_config: |
-  client
-  dev tun
-  proto udp
-  remote 203.0.113.7 1194
+vault_qbittorrent_openvpn_user: the-generated-username
+vault_qbittorrent_openvpn_password: the-generated-password
+vault_qbittorrent_openvpn_cert: |
+  -----BEGIN CERTIFICATE-----
   ...
+  -----END CERTIFICATE-----
+vault_qbittorrent_openvpn_key: |
+  -----BEGIN PRIVATE KEY-----
+  ...
+  -----END PRIVATE KEY-----
+vault_qbittorrent_password_pbkdf2: "@ByteArray(...)"
 ```
 
-**The `remote` line must name an IP address, not a hostname.** gluetun raises its
-firewall before OpenVPN starts, so it can never resolve that name — the symptom
-is a container that hangs rather than a DNS error. Resolve it yourself
-(`dig +short vpn.example.com`) and put the address in the vault. The role
-asserts this before deploying anything. Any `ca`/`cert`/`key` line must be
-inlined as a `<ca>...</ca>` block too: gluetun rewrites the file elsewhere, so
-relative paths break.
+The four are written to `/etc/qbittorrent/secrets/` and passed as compose
+secrets, so they stay out of `docker inspect` and the container's environment.
+The file names are gluetun's own: `openvpn_user`, `openvpn_password`,
+`openvpn_clientcrt`, `openvpn_clientkey`. The two PEM ones keep their armour
+lines — gluetun runs those through a PEM parser and base64s them itself, which
+is the one place it accepts anything but a single base64 line.
 
 The WebUI password is stored the way qBittorrent stores it, PBKDF2-HMAC-SHA512
 over 100000 iterations:
@@ -193,9 +208,10 @@ under gluetun's. To make the template authoritative again for one run:
 ansible-playbook playbook.yml -K --tags qbittorrent -e qbittorrent_reset_config=true
 ```
 
-Incoming peer connections only work if the provider forwards a port. When it
-does, put that port in `qbittorrent_vpn_input_ports` so gluetun opens it on the
-tunnel side, and set the same port as the listening port in the WebUI.
+Incoming peer connections do not work, and cannot: CyberGhost forwards no port,
+and gluetun only implements port forwarding for PIA, PrivateVPN and ProtonVPN.
+Outgoing connections to peers are unaffected, so downloads work — it costs seed
+ratio and slower swarm discovery, nothing else. There is no setting to fix here.
 
 ## The *arr stack
 

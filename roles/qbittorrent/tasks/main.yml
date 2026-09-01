@@ -10,37 +10,37 @@
 - name: Check the vault holds the VPN credentials
   ansible.builtin.assert:
     that:
-      - vault_qbittorrent_openvpn_config | default('') | length > 0
       - vault_qbittorrent_openvpn_user | default('') | length > 0
       - vault_qbittorrent_openvpn_password | default('') | length > 0
+      - vault_qbittorrent_openvpn_cert | default('') | length > 0
+      - vault_qbittorrent_openvpn_key | default('') | length > 0
       - vault_qbittorrent_password_pbkdf2 | default('') | length > 0
     fail_msg: >-
       Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
-      vault_qbittorrent_openvpn_config (the whole .ovpn file),
-      vault_qbittorrent_openvpn_user, vault_qbittorrent_openvpn_password and
-      vault_qbittorrent_password_pbkdf2. See the README.
+      vault_qbittorrent_openvpn_user, vault_qbittorrent_openvpn_password,
+      vault_qbittorrent_openvpn_cert, vault_qbittorrent_openvpn_key and
+      vault_qbittorrent_password_pbkdf2. The first four all come from one
+      "manual configuration" in the CyberGhost dashboard — see
+      TODO-qbittorrent.md for where to click.
     quiet: true
 
-# gluetun's firewall is up before OpenVPN starts, so the client cannot resolve
-# anything — a `remote` line naming a hostname never connects, and the failure
-# looks like a hang rather than a DNS error.
-- name: Check the OpenVPN remote is an IP address
+# CyberGhost authenticates with a client certificate on top of the username and
+# password, and gluetun refuses to start without both ("client certificate:
+# missing value"). The secret files hold the PEM blocks verbatim: gluetun reads
+# /run/secrets/openvpn_clientcrt and openvpn_clientkey through a PEM parser and
+# base64s them itself, which is the one place it accepts the armour lines.
+- name: Check the client certificate and key are unencrypted PEM blocks
   ansible.builtin.assert:
     that:
-      - qbittorrent_openvpn_remote is match('^([0-9]{1,3}\.){3}[0-9]{1,3}$')
+      - vault_qbittorrent_openvpn_cert is search('-----BEGIN CERTIFICATE-----')
+      - vault_qbittorrent_openvpn_key is search('-----BEGIN (RSA |EC )?PRIVATE KEY-----')
     fail_msg: >-
-      The `remote` line of vault_qbittorrent_openvpn_config points at
-      '{{ qbittorrent_openvpn_remote }}', which is not an IP address. Resolve it
-      (`dig +short {{ qbittorrent_openvpn_remote }}`) and put the address in the
-      vault instead: gluetun blocks DNS until the tunnel is up, so it can never
-      resolve that name itself.
+      vault_qbittorrent_openvpn_cert must be the whole client.crt and
+      vault_qbittorrent_openvpn_key the whole client.key, armour lines included,
+      as `|` block scalars. An `ENCRYPTED PRIVATE KEY` will not do either:
+      gluetun wants OPENVPN_ENCRYPTED_KEY and a passphrase for those, which
+      CyberGhost never hands out.
     quiet: true
-  vars:
-    # Block scalar so the regex reaches Jinja with its backslashes intact.
-    qbittorrent_openvpn_remote: >-
-      {{ (vault_qbittorrent_openvpn_config
-          | regex_search('(?m)^\s*remote\s+(\S+)', '\1')
-          | default([''], true))[0] }}
 
 - name: Create the qbittorrent service account
   ansible.builtin.user:
@@ -95,18 +95,17 @@
     - "{{ qbittorrent_downloads_dir }}/incomplete"
     - "{{ qbittorrent_downloads_dir }}/complete"
 
-- name: Deploy the OpenVPN configuration
-  ansible.builtin.template:
-    src: custom.ovpn.j2
-    dest: "{{ qbittorrent_stack_dir }}/custom.ovpn"
-    owner: root
-    group: root
-    mode: "0600"
-  no_log: true
-  register: qbittorrent_ovpn_state
+# Left over from the custom-provider arrangement, before gluetun was told the
+# provider is CyberGhost and started supplying the server list and the CA
+# itself. It is a file full of credentials, so it does not just get orphaned.
+- name: Remove the custom OpenVPN configuration
+  ansible.builtin.file:
+    path: "{{ qbittorrent_stack_dir }}/custom.ovpn"
+    state: absent
 
 # Passed as compose secrets rather than environment variables so they stay out
-# of `docker inspect` and the container's /proc/1/environ.
+# of `docker inspect` and the container's /proc/1/environ. The file names are
+# gluetun's own: it looks for /run/secrets/<name> for each of these.
 - name: Deploy the OpenVPN credentials
   ansible.builtin.copy:
     content: "{{ item.value }}"
@@ -119,6 +118,10 @@
       value: "{{ vault_qbittorrent_openvpn_user }}"
     - name: openvpn_password
       value: "{{ vault_qbittorrent_openvpn_password }}"
+    - name: openvpn_clientcrt
+      value: "{{ vault_qbittorrent_openvpn_cert }}"
+    - name: openvpn_clientkey
+      value: "{{ vault_qbittorrent_openvpn_key }}"
   loop_control:
     label: "{{ item.name }}"
   no_log: true
@@ -151,11 +154,10 @@
     files: [compose.yml]
     state: present
     # Fail loudly if the tunnel never comes up, rather than hanging forever on
-    # a bad .ovpn — gluetun retries the connection indefinitely on its own.
+    # bad credentials — gluetun retries the connection indefinitely on its own.
     wait: true
     wait_timeout: "{{ qbittorrent_wait_timeout }}"
     recreate: >-
       {{ 'always' if (qbittorrent_compose_state.changed
-                      or qbittorrent_ovpn_state.changed
                       or qbittorrent_secrets_state.changed
                       or qbittorrent_config_state.changed) else 'auto' }}

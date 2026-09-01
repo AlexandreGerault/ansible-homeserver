@@ -5,8 +5,8 @@ qbittorrent_gluetun_image: qmcgaw/gluetun:v3.41.3
 qbittorrent_image: lscr.io/linuxserver/qbittorrent:5.2.3
 
 # Config lives in /etc and state in /var/lib, like authelia — not under
-# ~/apps with the other compose stacks. The OpenVPN file and the credentials
-# are root-only, and compose has to be able to read them.
+# ~/apps with the other compose stacks. The VPN credentials are root-only, and
+# compose has to be able to read them.
 qbittorrent_stack_dir: /etc/qbittorrent
 qbittorrent_config_dir: /var/lib/qbittorrent
 qbittorrent_downloads_dir: "{{ jellyfin_media_root }}/downloads"
@@ -30,11 +30,27 @@ qbittorrent_webui_port: 8099
 qbittorrent_webui_domain: ""
 qbittorrent_webui_username: admin
 
-# The peer port qBittorrent listens on inside the tunnel. It is only reachable
-# if the provider forwards a port to you; put that port in
-# qbittorrent_vpn_input_ports for gluetun to let it through its firewall.
+# The peer port qBittorrent listens on inside the tunnel. CyberGhost does not
+# forward ports — gluetun only implements port forwarding for PIA, PrivateVPN
+# and ProtonVPN — so nothing ever connects back in on it. Outgoing connections
+# to peers are unaffected, which is enough to download; it only costs some seed
+# ratio and slower swarm discovery.
 qbittorrent_torrenting_port: 6881
-qbittorrent_vpn_input_ports: []
+
+# CyberGhost is a provider gluetun knows natively: it holds the server list and
+# the CA, so there is no .ovpn file to carry around and no hostname to resolve
+# by hand. It authenticates with a username and password *plus* a client
+# certificate and key — all four come from one "manual configuration" in the
+# CyberGhost dashboard, and all four live in the vault. See TODO-qbittorrent.md.
+qbittorrent_vpn_provider: cyberghost
+qbittorrent_openvpn_protocol: udp
+
+# Which servers gluetun is allowed to pick from. Leave both empty to let it
+# choose anywhere in the world, which is rarely what you want for torrenting.
+# Country names must match gluetun's own list:
+#   docker run --rm qmcgaw/gluetun format-servers -cyberghost
+qbittorrent_vpn_server_countries: []
+qbittorrent_vpn_server_hostnames: []
 
 # The container writes as this account, with the media group so Jellyfin can
 # read what lands in the download directory.

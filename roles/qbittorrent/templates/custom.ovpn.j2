@@ -1,6 +1,0 @@
-# {{ ansible_managed }}
-# Verbatim copy of vault_qbittorrent_openvpn_config. gluetun parses this file,
-# rewrites it to /etc/openvpn/target.ovpn and appends its own auth options, so
-# any `ca`/`cert`/`key`/`up` line pointing at a relative path breaks — inline
-# the material with <ca>...</ca> blocks, which is what providers ship anyway.
-{{ vault_qbittorrent_openvpn_config }}

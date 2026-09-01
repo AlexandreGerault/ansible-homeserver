@@ -185,10 +185,24 @@ qbittorrent_webui_domain: torrent.alexandre-gerault.fr
 qbittorrent_webui_port: 8099
 qbittorrent_webui_username: admin
 qbittorrent_torrenting_port: 6881
-# Fill this in only if the VPN provider forwards a port to you, with the port it
-# gave you — it is what lets peers connect back in through the tunnel. Then set
-# the same port as Session\Port in the WebUI.
-qbittorrent_vpn_input_ports: []
+
+# The VPN is CyberGhost, over OpenVPN, through gluetun's built-in provider. The
+# account details are four vault keys; TODO-qbittorrent.md says where they come
+# from. CyberGhost forwards no port, so nothing connects back in on the
+# torrenting port above — that is expected, not a misconfiguration.
+qbittorrent_openvpn_protocol: udp
+
+# Where the exit node sits. Netherlands because it is close enough for the
+# latency not to hurt, and unlike France it is not a jurisdiction to seed from.
+# Widen the list to let gluetun fail over to another country when a server is
+# full. Names must match gluetun's list, which is not always the obvious one
+# ("Czech Republic", "United Kingdom"):
+#   docker run --rm qmcgaw/gluetun format-servers -cyberghost
+qbittorrent_vpn_server_countries:
+  - Netherlands
+# Pin one exact host instead, when a country is not specific enough. Empty means
+# "anything in the countries above", which is what you want almost always.
+qbittorrent_vpn_server_hostnames: []
 
 # =============================================================================
 # *arr stack — Prowlarr indexers feeding Sonarr and Radarr, Bazarr for the

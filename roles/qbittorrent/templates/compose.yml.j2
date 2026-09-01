@@ -25,23 +25,31 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
-      VPN_SERVICE_PROVIDER: custom
+      # CyberGhost is built into gluetun: it ships the server list and the
+      # CyberGhost root CA, picks a host matching the filters below and resolves
+      # it before raising the firewall. Nothing here needs a .ovpn file.
+      VPN_SERVICE_PROVIDER: {{ qbittorrent_vpn_provider }}
       VPN_TYPE: openvpn
-      OPENVPN_CUSTOM_CONFIG: /gluetun/custom.ovpn
+      OPENVPN_PROTOCOL: {{ qbittorrent_openvpn_protocol }}
+{% if qbittorrent_vpn_server_countries %}
+      SERVER_COUNTRIES: "{{ qbittorrent_vpn_server_countries | join(',') }}"
+{% endif %}
+{% if qbittorrent_vpn_server_hostnames %}
+      SERVER_HOSTNAMES: "{{ qbittorrent_vpn_server_hostnames | join(',') }}"
+{% endif %}
       TZ: {{ common_timezone }}
       # Without this the killswitch drops the *arr containers' traffic too:
       # gluetun's firewall only routes replies back to subnets it has been told
       # about, and the media network is not one it discovers on its own.
       FIREWALL_OUTBOUND_SUBNETS: "{{ media_network_subnet }}"
-{% if qbittorrent_vpn_input_ports %}
-      # Peer port forwarded by the provider, opened on the tunnel side.
-      FIREWALL_VPN_INPUT_PORTS: "{{ qbittorrent_vpn_input_ports | join(',') }}"
-{% endif %}
+    # CyberGhost wants a client certificate and key on top of the username and
+    # password. gluetun reads all four from /run/secrets, and parses the two PEM
+    # ones itself — hence the files hold the armour lines, not base64.
     secrets:
       - openvpn_user
       - openvpn_password
-    volumes:
-      - {{ qbittorrent_stack_dir }}/custom.ovpn:/gluetun/custom.ovpn:ro
+      - openvpn_clientcrt
+      - openvpn_clientkey
     networks:
       - default
       - media
@@ -74,3 +82,7 @@ secrets:
     file: {{ qbittorrent_stack_dir }}/secrets/openvpn_user
   openvpn_password:
     file: {{ qbittorrent_stack_dir }}/secrets/openvpn_password
+  openvpn_clientcrt:
+    file: {{ qbittorrent_stack_dir }}/secrets/openvpn_clientcrt
+  openvpn_clientkey:
+    file: {{ qbittorrent_stack_dir }}/secrets/openvpn_clientkey
