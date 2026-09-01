@@ -29,9 +29,13 @@ WebUI\LocalHostAuth=true
 WebUI\CSRFProtection=true
 WebUI\ClickjackingProtection=true
 # Caddy passes the original Host through, so validation stays on and only the
-# real vhost is accepted. Requests that reach the port with any other Host —
-# anything probing the loopback directly — are refused.
+# names below are accepted; anything probing the loopback with another Host is
+# refused. `gluetun` has to be one of them: it is the name Sonarr, Radarr,
+# Prowlarr and the Homepage widget reach the WebUI by, and qBittorrent matches
+# the Host header against this list before it looks at credentials — leaving it
+# out answers 401 to the whole *arr stack, which reads like a bad password.
+# The separator is a semicolon; qBittorrent splits on ';', not on ','.
 WebUI\HostHeaderValidation=true
-WebUI\ServerDomains={{ qbittorrent_webui_domain }}
+WebUI\ServerDomains={{ (([qbittorrent_webui_domain] if qbittorrent_webui_domain else []) + ['gluetun']) | join(';') }}
 WebUI\HTTPS\Enabled=false
 WebUI\UseUPnP=false

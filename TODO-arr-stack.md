@@ -116,17 +116,38 @@ Reading these before the first run is worth it — they are not additive.
       Expect jellyfin, homepage, gluetun, prowlarr, sonarr, radarr, bazarr,
       jellyseerr.
 
-- [ ] Sonarr can actually reach the download client through gluetun's firewall.
-      This is the one thing most likely to be wrong, because it depends on
-      `FIREWALL_OUTBOUND_SUBNETS` matching the network's subnet:
+- [ ] Sonarr can actually reach the download client, and qBittorrent accepts the
+      request. Two different things go wrong here and they need different fixes,
+      so read the status code rather than just checking it answered:
 
       ssh homeserver 'docker exec sonarr curl -s -o /dev/null -w "%{http_code}\n" http://gluetun:8080/api/v2/app/version'
 
-      A hang or a connection refused means gluetun is dropping it. Check that
-      `media_network_subnet` in group_vars is the subnet the network actually
-      got:
+      **`403` is the result you want.** That endpoint needs a login and this
+      curl does not have one, so 403 means the connection crossed the network
+      and qBittorrent processed it — which is everything this check can prove.
+
+      **A hang or a connection refused** is gluetun's firewall dropping it, and
+      depends on `FIREWALL_OUTBOUND_SUBNETS` matching the network's subnet.
+      Check that `media_network_subnet` in group_vars is the subnet the network
+      actually got:
 
       ssh homeserver 'docker network inspect media -f "{{range .IPAM.Config}}{{.Subnet}}{{end}}"'
+
+      **`401` is the host header check**, which qBittorrent applies before it
+      looks at credentials: it matches the `Host` header — `gluetun:8080` here —
+      against `WebUI\ServerDomains`, and refuses anything not in the list.
+      `gluetun` is in the seeded config, but that file is seed-only, so an
+      installation seeded before it was there keeps the old list. Make the
+      template authoritative again for one run — it discards WebUI changes:
+
+      ansible-playbook playbook.yml -K --tags qbittorrent -e qbittorrent_reset_config=true
+
+      A **failing Test button in Sonarr's UI** while this curl returns 403 is
+      the other cause: `vault_qbittorrent_password_pbkdf2` and
+      `vault_qbittorrent_webui_password` are not the same password. Nothing
+      asserts that they match — the hash cannot be checked against the cleartext
+      without redoing the PBKDF2 — so it is worth re-deriving the hash from the
+      cleartext with the snippet in TODO-qbittorrent.md before looking further.
 
 - [ ] The wiring took. In each web interface, or over the API:
 

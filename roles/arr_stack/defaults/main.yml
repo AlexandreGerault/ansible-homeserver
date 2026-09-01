@@ -51,6 +51,12 @@ arr_media_group: jellyfin
 arr_download_client_host: gluetun
 arr_download_client_port: 8080
 
+# The WebUI account Sonarr, Radarr and Prowlarr log in to that client with. It
+# is set once in group_vars for both roles; defaulted here so this one still
+# renders when run on its own with --tags arr. The password beside it is
+# vault_qbittorrent_webui_password, which the assert in tasks/main.yml checks.
+qbittorrent_webui_username: admin
+
 # Categories qBittorrent files the downloads under, one directory each below
 # the completed path. These are the names Sonarr and Radarr default to.
 arr_sonarr_category: tv-sonarr
