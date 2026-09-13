@@ -60,6 +60,11 @@ qbittorrent_media_group: jellyfin
 # qBittorrent rewrites qBittorrent.conf itself every time it exits, so the file
 # is seeded once and then left alone — whatever you change in the WebUI sticks.
 # Flip this to true for one run to make the template authoritative again.
+#
+# C'est cette réécriture-à-l'arrêt qui oblige le rôle à couper le conteneur
+# avant de resemer : voir la tâche « Stop qBittorrent before reseeding ». Un
+# run avec reset_config=true interrompt donc brièvement le tunnel et les
+# téléchargements en cours, en plus de jeter les réglages faits dans la WebUI.
 qbittorrent_reset_config: false
 
 # How long to wait for gluetun to report healthy, i.e. for the tunnel to be up.

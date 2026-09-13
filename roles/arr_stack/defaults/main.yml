@@ -86,6 +86,12 @@ arr_reset_config: false
 arr_wait_retries: 40
 arr_wait_delay: 5
 
+# Les tâches de câblage masquent leur sortie : elles portent la clé d'API et le
+# mot de passe du client de téléchargement. Passez arr_no_log=false le temps
+# d'un run pour voir la réponse de l'API quand une d'elles échoue — cela affiche
+# aussi les secrets dans le terminal, donc uniquement pour diagnostiquer.
+arr_no_log: true
+
 # Set to false to bring the containers up without touching their settings over
 # the API — useful when you want to wire something by hand.
 arr_configure: true

@@ -1,62 +1,19 @@
-# *arr stack — what is left before it works
+# Stack *arr — la lancer
 
-The `arr_stack` role is written, wired into `playbook.yml` and documented in the
-README. Nothing has run against the server yet. Like the qBittorrent role, it
-asserts on vault keys that do not exist, so `--tags arr` fails fast rather than
-deploying a half-configured stack.
+Le rôle `arr_stack` est écrit, câblé dans `playbook.yml` et documenté dans le
+README. Les quatre clés d'API et le mot de passe WebUI de qBittorrent sont dans
+le vault et vérifiés (32 caractères chacune) ; les cinq enregistrements DNS
+résolvent, en A explicites, pas en joker.
 
-**It depends on the qBittorrent role having run first.** Sonarr and Radarr are
-wired to a download client at `gluetun:8080`, and Homepage's widget calls the
-same address. That container has to exist. Finish `TODO-qbittorrent.md` first —
-the VPN account is still the critical path for both.
+**Rien n'a encore tourné sur le serveur.**
 
-## Can be done now
+La section de prérequis qui vivait ici — DNS, génération des clés d'API,
+remplissage du vault — est faite et a été retirée.
 
-- [ ] **DNS.** Five new names, unless there is already a wildcard
-      `*.alexandre-gerault.fr`:
-
-      prowlarr.alexandre-gerault.fr
-      sonarr.alexandre-gerault.fr
-      radarr.alexandre-gerault.fr
-      bazarr.alexandre-gerault.fr
-      requests.alexandre-gerault.fr
-
-      This is the one step with a propagation delay, so it is worth doing first.
-      Caddy needs each to resolve publicly before it can get a certificate.
-
-- [ ] Generate the four API keys and keep them until the vault edit:
-
-      for a in prowlarr sonarr radarr bazarr; do
-        echo "vault_${a}_api_key: $(python3 -c 'import secrets; print(secrets.token_hex(16))')"
-      done
-
-- [ ] Add them to the vault, along with the qBittorrent WebUI password in clear.
-      That last one is new: `TODO-qbittorrent.md` listed it as optional, for the
-      Homepage widget only. It is now required — it is what Sonarr and Radarr
-      authenticate to the download client with.
-
-      ansible-vault edit group_vars/all/vault.yml
-
-      ```yaml
-      vault_prowlarr_api_key: ...
-      vault_sonarr_api_key: ...
-      vault_radarr_api_key: ...
-      vault_bazarr_api_key: ...
-      vault_qbittorrent_webui_password: ...   # the same one behind the PBKDF2 hash
-      ```
-
-- [ ] Nothing to do for Authelia: its default rule is `*.alexandre-gerault.fr`
-      with `one_factor`, so the four protected vhosts are covered by the accounts
-      already in `vault_authelia_users`. Jellyseerr is intentionally not
-      protected — it signs people in against Jellyfin.
-
-- [ ] Nothing to do for UFW: every port is published on `127.0.0.1` and Caddy is
-      the only way in.
-
-- [ ] Check nothing is squatting the container names or the ports:
-
-      ssh homeserver 'docker ps -a --format "{{.Names}}" | grep -E "prowlarr|sonarr|radarr|bazarr|jellyseerr"'
-      ssh homeserver 'ss -lntp | grep -E ":(9696|8989|7878|6767|5055)"'
+**Elle dépend du rôle qbittorrent, lancé avant.** Sonarr et Radarr sont câblés
+sur un client de téléchargement à `gluetun:8080`, et le widget Homepage appelle
+la même adresse. Ce conteneur doit exister. Le script `deploy-media-stack.sh` à
+la racine enchaîne toute la séquence dans le bon ordre.
 
 ## Two existing roles change, and they move containers
 

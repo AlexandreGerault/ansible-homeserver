@@ -28,14 +28,28 @@ WebUI\Password_PBKDF2="{{ vault_qbittorrent_password_pbkdf2 }}"
 WebUI\LocalHostAuth=true
 WebUI\CSRFProtection=true
 WebUI\ClickjackingProtection=true
-# Caddy passes the original Host through, so validation stays on and only the
-# names below are accepted; anything probing the loopback with another Host is
-# refused. `gluetun` has to be one of them: it is the name Sonarr, Radarr,
-# Prowlarr and the Homepage widget reach the WebUI by, and qBittorrent matches
-# the Host header against this list before it looks at credentials — leaving it
-# out answers 401 to the whole *arr stack, which reads like a bad password.
-# The separator is a semicolon; qBittorrent splits on ';', not on ','.
+# Caddy passes the original Host through, so validation stays on et seuls les
+# noms ci-dessous sont acceptés. `gluetun` doit en faire partie : c'est le nom
+# par lequel Sonarr, Radarr, Prowlarr et le widget Homepage joignent la WebUI,
+# et qBittorrent compare l'en-tête Host à cette liste AVANT de regarder les
+# identifiants — l'omettre répond 401 à toute la stack *arr, ce qui ressemble à
+# un mauvais mot de passe.
+#
+# LES GUILLEMETS SONT OBLIGATOIRES, ne les retirez pas. qBittorrent sépare les
+# domaines par `;` (webapplication.cpp : `getServerDomains().split(u';')`), mais
+# lit le fichier avec QSettings, dont l'analyseur INI termine la ligne sur un
+# `;` rencontré hors guillemets :
+#
+#     Q_ASSERT(ch == ';');
+#     if (i == lineStart + 1) { /* commentaire de ligne */ }
+#     else if (!inQuotes) { --i; goto break_out_of_outer_loop; }
+#         — qtbase/src/corelib/io/qsettings.cpp, readIniLine
+#
+# Sans guillemets, tout ce qui suit le premier `;` est jeté à la lecture, puis
+# qBittorrent réécrit le fichier amputé à sa prochaine sortie. Entre guillemets
+# le `;` est conservé, et QSettings retire les guillemets à la lecture (même
+# fichier, iniUnescapedStringList : `case '"': ++i;` sans les recopier).
 WebUI\HostHeaderValidation=true
-WebUI\ServerDomains={{ (([qbittorrent_webui_domain] if qbittorrent_webui_domain else []) + ['gluetun']) | join(';') }}
+WebUI\ServerDomains="{{ (([qbittorrent_webui_domain] if qbittorrent_webui_domain else []) + ['gluetun']) | join(';') }}"
 WebUI\HTTPS\Enabled=false
 WebUI\UseUPnP=false

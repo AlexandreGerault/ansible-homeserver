@@ -127,6 +127,31 @@
   no_log: true
   register: qbittorrent_secrets_state
 
+# qBittorrent tient ses réglages en mémoire et réécrit qBittorrent.conf quand
+# il s'arrête. Semer le fichier pendant que le conteneur tourne ne sert donc à
+# rien : la tâche « Bring the stack up » plus bas le recrée, le SIGTERM fait
+# sauvegarder l'ancien processus, et la sauvegarde écrase ce qui vient d'être
+# écrit. Le nouveau conteneur relit alors l'ancienne configuration — un
+# reset_config qui n'a aucun effet visible et se diagnostique très mal.
+#
+# On l'arrête donc d'abord. Uniquement quand on reseme : en régime normal le
+# template ne réécrit rien (force: false) et il n'y a aucune raison de couper
+# le tunnel.
+- name: Check whether the compose project already exists
+  ansible.builtin.stat:
+    path: "{{ qbittorrent_stack_dir }}/compose.yml"
+  register: qbittorrent_compose_file
+  when: qbittorrent_reset_config | bool
+
+- name: Stop qBittorrent before reseeding its configuration
+  community.docker.docker_compose_v2:
+    project_src: "{{ qbittorrent_stack_dir }}"
+    files: [compose.yml]
+    state: stopped
+  when:
+    - qbittorrent_reset_config | bool
+    - qbittorrent_compose_file.stat.exists | default(false)
+
 # Seeded, not managed: see qbittorrent_reset_config in the role defaults.
 - name: Seed the qBittorrent configuration
   ansible.builtin.template:

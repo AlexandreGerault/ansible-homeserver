@@ -33,7 +33,7 @@
   loop: "{{ arr_root_folders | map(attribute='app') | unique | list }}"
   loop_control:
     loop_var: arr_app
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
 
 - name: Add the missing root folders
   ansible.builtin.uri:
@@ -52,7 +52,7 @@
     item.path not in ((arr_root_folder_state.results
                        | selectattr('arr_app', 'eq', item.app)
                        | first).json | map(attribute='path') | list)
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
 
 # -----------------------------------------------------------------------------
 # Download client — qBittorrent, reached at gluetun's name because it lives in
@@ -68,11 +68,25 @@
   loop_control:
     loop_var: client
     label: "{{ client.app }}"
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
 
-# forceSave skips the connection test. Without it this task fails whenever the
-# VPN tunnel happens to be down, which would make the whole stack's deployment
-# depend on gluetun being healthy — it does not need to be.
+# forceSave ne saute PAS le test de connexion, contrairement à ce que cette
+# tâche a longtemps supposé. Dans ProviderControllerBase, le POST teste dès que
+# la définition est activée :
+#
+#     if (providerDefinition.Enable) { Test(providerDefinition, !forceSave); }
+#
+# et forceSave n'y pilote que `includeWarnings` : VerifyValidationResult lève
+# sur les avertissements seulement si includeWarnings, mais lève TOUJOURS sur
+# une erreur. Seul le PUT saute vraiment le test (`&& !forceSave`).
+#
+# Conséquence assumée : cette tâche exige que qBittorrent réponde à
+# gluetun:8080. C'est le cas dans l'ordre du playbook, où le rôle qbittorrent
+# passe avant. Un échec ici est réel — un client enregistré mais incapable de
+# joindre le client de téléchargement serait pire, d'autant que la garde
+# `when` plus bas empêcherait toute correction au re-run.
+#
+# forceSave reste utile : il évite qu'un simple avertissement fasse échouer.
 - name: Add qBittorrent as the download client
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ arr_ports[item.client.app] }}/api/{{ item.client.api }}/downloadclient?forceSave=true"
@@ -87,6 +101,24 @@
       name: qBittorrent
       implementation: QBittorrent
       configContract: QBittorrentSettings
+      # Propriété de la *définition*, pas un champ de settings, et propre à
+      # Prowlarr : lui seul mappe des catégories d'indexeur vers des catégories
+      # du client. L'omettre la laisse à null et le test de connexion explose
+      # avant d'avoir rien tenté :
+      #
+      #   System.NullReferenceException
+      #     at DownloadClientBase`1.ValidateCategories(List`1 failures)
+      #        NzbDrone.Core/Download/DownloadClientBase.cs:line 101
+      #     at DownloadClientBase`1.Test()
+      #
+      # ce qui remonte ici en 400 « Test was aborted due to an error: Object
+      # reference not set to an instance of an object. » — illisible tant que
+      # l'on n'a pas lu /config/logs/prowlarr.txt.
+      #
+      # Sonarr et Radarr n'ont pas cette propriété (leur schéma ne la liste
+      # pas) mais ignorent la clé en trop, donc elle est envoyée aux trois
+      # plutôt que conditionnée sur l'application.
+      categories: []
       fields:
         - name: host
           value: "{{ arr_download_client_host }}"
@@ -107,7 +139,7 @@
   loop_control:
     label: "{{ item.client.app }}"
   when: "'qBittorrent' not in (item.json | map(attribute='name') | list)"
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
 
 # -----------------------------------------------------------------------------
 # Prowlarr → Sonarr and Radarr. Registering them here is what makes Prowlarr
@@ -119,7 +151,7 @@
     headers:
       X-Api-Key: "{{ arr_api_keys.prowlarr }}"
   register: arr_prowlarr_app_state
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
 
 - name: Register the applications with Prowlarr
   ansible.builtin.uri:
@@ -150,4 +182,4 @@
   loop_control:
     label: "{{ item.name }}"
   when: "item.name not in (arr_prowlarr_app_state.json | map(attribute='name') | list)"
-  no_log: true
+  no_log: "{{ arr_no_log | default(true) }}"
