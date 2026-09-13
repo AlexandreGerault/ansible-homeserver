@@ -19,6 +19,34 @@ Session\Port={{ qbittorrent_torrenting_port }}
 Session\Interface=tun0
 Session\InterfaceName=tun0
 
+# Seed sans fin. Ce sont déjà les valeurs par défaut de qBittorrent 5.2.3
+# (sessionimpl.cpp : GlobalMaxRatio -1, les deux compteurs de minutes -1) ;
+# elles sont écrites ici pour que le fichier dise ce qu'il fait, et pour qu'un
+# reseed les rétablisse si une limite a été posée dans la WebUI entre-temps.
+# -1 signifie « aucune limite » ; toute autre valeur arrête le torrent dès
+# qu'elle est atteinte, ce qui est exactement ce que l'on ne veut pas ici.
+Session\GlobalMaxRatio=-1
+Session\GlobalMaxSeedingMinutes=-1
+Session\GlobalMaxInactiveSeedingMinutes=-1
+
+# Découverte des pairs. Sans port redirigé par le fournisseur, personne ne nous
+# trouve en se connectant : c'est nous qui devons sortir vers l'essaim, et DHT
+# et PeX sont ce qui nous donne la liste des pairs à contacter en plus de celle
+# du tracker. Les couper ne laisse que le tracker, donc rien du tout sur un
+# torrent dont le tracker est en panne.
+Session\DHTEnabled=true
+Session\PeXEnabled=true
+Session\LSDEnabled=true
+
+# TCP et µTP. µTP compte double derrière un VPN : il passe en UDP, donc il
+# survit là où un pair filtre le TCP entrant, et il cède la bande passante aux
+# autres flux du tunnel plutôt que de saturer la liaison.
+Session\BTProtocol=Both
+
+# 0 = chiffrement accepté mais pas imposé. Le forcer (1) écarte les pairs qui
+# ne le gèrent pas, et le trafic est déjà dans le tunnel.
+Session\Encryption=0
+
 [Preferences]
 WebUI\Enabled=true
 WebUI\Address=*

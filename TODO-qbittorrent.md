@@ -135,8 +135,16 @@ qbittorrent_vpn_server_hostnames: []
 once and then leaves it alone. Everything here is done in the WebUI and stays:
 
 - [ ] Change the admin password if you would rather not keep the vault one.
-- [ ] Nothing to do about the listening port. Without port forwarding it only
-      decides which port outgoing connections come from, and 6881 is fine.
+- [ ] Nothing to do about the listening port. It is open in gluetun's firewall
+      on the tunnel interface (`qbittorrent_vpn_input_ports`), but CyberGhost
+      forwards nothing to it, so it only decides which port outgoing
+      connections come from — 6881 is fine. Changing it in the WebUI alone
+      would close the firewall on the new one: change
+      `qbittorrent_torrenting_port` instead, both follow it.
+- [ ] Nothing to do about the share limits either. The seed leaves ratio and
+      the two seeding timers at -1, so a torrent never stops on its own, and
+      the *arr stack only removes what has stopped. Setting a limit in the
+      WebUI is what would end the seeding.
 - [ ] Nothing to do about categories: Sonarr and Radarr create their own
       (`tv-sonarr`, `radarr`) under `/data/downloads/complete/` when they hand a
       release over. Add one by hand only for what you download outside them.

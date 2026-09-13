@@ -208,10 +208,34 @@ under gluetun's. To make the template authoritative again for one run:
 ansible-playbook playbook.yml -K --tags qbittorrent -e qbittorrent_reset_config=true
 ```
 
-Incoming peer connections do not work, and cannot: CyberGhost forwards no port,
-and gluetun only implements port forwarding for PIA, PrivateVPN and ProtonVPN.
-Outgoing connections to peers are unaffected, so downloads work — it costs seed
-ratio and slower swarm discovery, nothing else. There is no setting to fix here.
+### Seeding
+
+Two different things have to be true for a peer to reach the client, and only
+one of them is ours to set:
+
+- **gluetun's firewall has to accept the peer port.** It does:
+  `qbittorrent_vpn_input_ports` puts the torrenting port in
+  `FIREWALL_VPN_INPUT_PORTS`, which opens it in TCP and UDP on the tunnel
+  interface — there, and nowhere else. Without it gluetun drops every
+  connection the client did not open itself, conntrack replies aside.
+- **The provider has to route that port back to us.** CyberGhost does not
+  forward ports at all, and gluetun only drives port forwarding for PIA,
+  PrivateVPN and ProtonVPN. So nothing arrives on the open port today.
+
+Which means seeding works, but only outwards: the client finds peers through
+the tracker, the DHT and PeX, connects to those that are reachable, and uploads
+to them. What it cannot do is be found by a peer that is itself behind a NAT.
+Expect a usable ratio on well-populated torrents and very little on quiet ones.
+There is no setting that fixes the second bullet — it takes a provider that
+forwards a port, at which point `qbittorrent_vpn_input_ports` is already right
+and only `Session\Port` has to follow the forwarded one.
+
+The seeded configuration leaves the share limits at "no limit"
+(`GlobalMaxRatio`, `GlobalMaxSeedingMinutes` and
+`GlobalMaxInactiveSeedingMinutes` all `-1`), so nothing ever stops seeding on
+its own. Sonarr and Radarr do not remove a torrent that is still seeding, and
+their imports are hardlinks, so a finished download keeps seeding from the
+library copy's inode.
 
 ## The *arr stack
 

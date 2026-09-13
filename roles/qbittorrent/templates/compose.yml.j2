@@ -42,6 +42,15 @@ services:
       # gluetun's firewall only routes replies back to subnets it has been told
       # about, and the media network is not one it discovers on its own.
       FIREWALL_OUTBOUND_SUBNETS: "{{ media_network_subnet }}"
+{% if qbittorrent_vpn_input_ports %}
+      # Le port des pairs, ouvert en entrée sur l'interface du tunnel et là
+      # seulement — pas sur le bridge docker, pas sur l'hôte. C'est ce qui
+      # permet à un pair d'ouvrir la connexion plutôt que de devoir être
+      # contacté en premier. Voir qbittorrent_vpn_input_ports dans les defaults
+      # du rôle : tant que le fournisseur ne redirige aucun port, la règle ne
+      # voit rien passer.
+      FIREWALL_VPN_INPUT_PORTS: "{{ qbittorrent_vpn_input_ports | join(',') }}"
+{% endif %}
     # CyberGhost wants a client certificate and key on top of the username and
     # password. gluetun reads all four from /run/secrets, and parses the two PEM
     # ones itself — hence the files hold the armour lines, not base64.

@@ -188,8 +188,10 @@ qbittorrent_torrenting_port: 6881
 
 # The VPN is CyberGhost, over OpenVPN, through gluetun's built-in provider. The
 # account details are four vault keys; TODO-qbittorrent.md says where they come
-# from. CyberGhost forwards no port, so nothing connects back in on the
-# torrenting port above — that is expected, not a misconfiguration.
+# from. The torrenting port above is open in gluetun's firewall on the tunnel
+# interface, but CyberGhost forwards no port, so nothing arrives on it — the
+# client seeds to the peers it reaches itself, and cannot be reached in turn.
+# See "Seeding" in the README.
 qbittorrent_openvpn_protocol: udp
 
 # Where the exit node sits. Netherlands because it is close enough for the

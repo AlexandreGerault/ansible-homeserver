@@ -30,12 +30,27 @@ qbittorrent_webui_port: 8099
 qbittorrent_webui_domain: ""
 qbittorrent_webui_username: admin
 
-# The peer port qBittorrent listens on inside the tunnel. CyberGhost does not
-# forward ports — gluetun only implements port forwarding for PIA, PrivateVPN
-# and ProtonVPN — so nothing ever connects back in on it. Outgoing connections
-# to peers are unaffected, which is enough to download; it only costs some seed
-# ratio and slower swarm discovery.
+# Le port sur lequel qBittorrent écoute les pairs, dans le tunnel. C'est aussi
+# le port qu'il annonce aux trackers et au DHT.
 qbittorrent_torrenting_port: 6881
+
+# Ports que le pare-feu de gluetun accepte en entrée *sur l'interface du
+# tunnel*, TCP et UDP (internal/firewall/iptables.go, acceptInputToPort pose
+# une règle par protocole). gluetun laisse toujours repasser les réponses aux
+# connexions que l'on ouvre — conntrack —, mais jette toute connexion entrante
+# non sollicitée dont le port n'est pas dans cette liste. Sans le port de pairs
+# ici, qBittorrent ne peut parler qu'aux pairs qu'il a contactés lui-même : il
+# seede uniquement vers ceux qui sont joignables, et reste invisible pour le
+# reste de l'essaim.
+#
+# Nécessaire, pas suffisant : encore faut-il qu'un paquet arrive jusqu'à cette
+# règle, donc que le fournisseur redirige le port. CyberGhost ne le fait pas et
+# gluetun ne sait le piloter que chez PIA, PrivateVPN et ProtonVPN. L'ouverture
+# reste juste : elle ne coûte rien tant que rien n'arrive, et elle est la
+# moitié qui manquerait le jour où le fournisseur change. Videz la liste pour
+# refermer le port.
+qbittorrent_vpn_input_ports:
+  - "{{ qbittorrent_torrenting_port }}"
 
 # CyberGhost is a provider gluetun knows natively: it holds the server list and
 # the CA, so there is no .ovpn file to carry around and no hostname to resolve
