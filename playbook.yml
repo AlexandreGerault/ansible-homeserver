@@ -23,6 +23,10 @@
     # gluetun's name, which has to exist on the media network first.
     - role: arr_stack
       tags: [arr, apps]
+    # After authelia: the role waits for Forgejo to answer and then registers
+    # Authelia as its authentication source, so the provider has to exist first.
+    - role: forgejo
+      tags: [forgejo, apps]
     - role: homepage
       tags: [homepage, apps]
     - role: arbitrage_ffv

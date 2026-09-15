@@ -1,0 +1,75 @@
+---
+# Authelia is registered as an OAuth2 authentication source of provider type
+# openidConnect. There is no file to template for this: Forgejo keeps its
+# authentication sources in the database, and the only supported way in is the
+# admin CLI — so the role reads back what is already there and adds the source
+# when it is missing, the same seed-once approach arr_stack takes with its
+# config.xml files.
+
+- name: Wait for forgejo to answer
+  ansible.builtin.uri:
+    url: "http://{{ docker_publish_address }}:{{ forgejo_web_port }}/api/healthz"
+    status_code: [200]
+  register: forgejo_health
+  retries: "{{ forgejo_wait_retries }}"
+  delay: "{{ forgejo_wait_delay }}"
+  until: forgejo_health.status | default(0) == 200
+
+- name: Read the configured authentication sources
+  ansible.builtin.command:
+    argv: [docker, exec, --user, git, forgejo, forgejo, admin, auth, list, --vertical-bars]
+  changed_when: false
+  register: forgejo_auth_list
+
+# `--vertical-bars` is what makes this parseable, but not on its own: the
+# columns are still tab-padded, so a line reads `1\t|authelia\t|OAuth2\t|true`.
+# The whitespace goes before matching — a pattern that expects `1|authelia|`
+# finds nothing, and add-oauth then runs again on every play and fails on the
+# name that already exists.
+- name: Locate the authelia authentication source
+  ansible.builtin.set_fact:
+    forgejo_oidc_source_id: >-
+      {{ ((forgejo_auth_list.stdout_lines
+            | map('regex_replace', '\\s+', '')
+            | select('match', '^[0-9]+\\|' ~ forgejo_oidc_source_name ~ '\\|')
+            | list) + [''])[0].split('|')[0] }}
+
+- name: Build the authentication source arguments
+  ansible.builtin.set_fact:
+    forgejo_oidc_args: >-
+      {{ ['--name=' ~ forgejo_oidc_source_name,
+          '--provider=openidConnect',
+          '--key=' ~ forgejo_oidc_client_id,
+          '--secret=' ~ vault_forgejo_oidc_client_secret,
+          '--auto-discover-url=https://' ~ authelia_domain
+            ~ '/.well-known/openid-configuration',
+          '--scopes=' ~ forgejo_oidc_scopes,
+          '--group-claim-name=' ~ forgejo_oidc_group_claim,
+          '--admin-group=' ~ forgejo_oidc_admin_group]
+         + (['--restricted-group=' ~ forgejo_oidc_restricted_group]
+            if forgejo_oidc_restricted_group | length > 0 else [])
+         + (['--skip-local-2fa'] if forgejo_oidc_skip_local_2fa | bool else []) }}
+  no_log: "{{ forgejo_no_log }}"
+
+- name: Register authelia as an authentication source
+  ansible.builtin.command:
+    argv: >-
+      {{ ['docker', 'exec', '--user', 'git', 'forgejo',
+          'forgejo', 'admin', 'auth', 'add-oauth'] + forgejo_oidc_args }}
+  when: forgejo_oidc_source_id | length == 0
+  no_log: "{{ forgejo_no_log }}"
+  changed_when: true
+
+# The CLI offers no way to read a source back, so there is nothing to compare
+# against and nothing to report as changed. See forgejo_oidc_update.
+- name: Update the authelia authentication source
+  ansible.builtin.command:
+    argv: >-
+      {{ ['docker', 'exec', '--user', 'git', 'forgejo',
+          'forgejo', 'admin', 'auth', 'update-oauth',
+          '--id', forgejo_oidc_source_id] + forgejo_oidc_args }}
+  when:
+    - forgejo_oidc_source_id | length > 0
+    - forgejo_oidc_update | bool
+  no_log: "{{ forgejo_no_log }}"
+  changed_when: true

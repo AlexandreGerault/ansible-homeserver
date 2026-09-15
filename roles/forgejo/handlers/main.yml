@@ -1,0 +1,6 @@
+---
+- name: Restart forgejo
+  community.docker.docker_container:
+    name: forgejo
+    state: started
+    restart: true

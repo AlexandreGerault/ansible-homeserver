@@ -1,5 +1,7 @@
 ---
-authelia_image: ghcr.io/authelia/authelia:4.38
+# 4.39 rather than 4.38: the OpenID Connect provider left beta there, and it is
+# the version the upstream client documentation is written and tested against.
+authelia_image: ghcr.io/authelia/authelia:4.39
 authelia_config_dir: /etc/authelia
 authelia_data_dir: /var/lib/authelia
 authelia_port: 8098
@@ -14,3 +16,31 @@ docker_publish_address: "127.0.0.1"
 authelia_access_rules:
   - domain: "*.{{ authelia_root_domain }}"
     policy: one_factor
+
+# Environment of the container. Secrets are never values here: they are mounted
+# as files under /secrets and named through the *_FILE variables Authelia reads
+# them from.
+#
+# X_AUTHELIA_CONFIG_FILTERS enables the template engine over configuration.yml,
+# which is the only way to keep the OpenID Connect signing key out of that file
+# — it belongs to a list of objects, and Authelia cannot take list members from
+# environment variables at all.
+authelia_base_env:
+  X_AUTHELIA_CONFIG: /config/configuration.yml
+  X_AUTHELIA_CONFIG_FILTERS: template
+  AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/JWT_SECRET
+  AUTHELIA_SESSION_SECRET_FILE: /secrets/SESSION_SECRET
+  AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/STORAGE_ENCRYPTION_KEY
+
+# OpenID Connect clients. Empty means the provider is not configured at all —
+# the whole identity_providers section disappears from the configuration, and no
+# signing key or HMAC secret is needed.
+#
+# An entry is:
+#   id, name:       client_id and the label shown on the consent screen
+#   secret_digest:  the pbkdf2 hash of the client secret, never the secret
+#   redirect_uris:  exact callback URLs, no wildcards
+#   policy:         one_factor or two_factor, per client
+#   scopes:         defaults to openid/email/profile/groups
+authelia_oidc_clients: []
+

@@ -1,0 +1,131 @@
+---
+# Forgejo v15 is the long-term-support line: bug and security fixes until
+# 2027-07-15. Pinned like every other image here — a major bump runs database
+# migrations that do not roll back, and is not something to discover from a
+# container that restarted by itself overnight.
+forgejo_image: codeberg.org/forgejo/forgejo:15.0.4
+
+forgejo_app_name: Forgejo
+forgejo_domain: git.alexandre-gerault.fr
+forgejo_web_port: 3030
+
+# Same split as arr_stack: app.ini in /etc, the repositories and the SQLite
+# database in /var/lib. /etc/forgejo is mounted over /data/gitea/conf, which is
+# where the image looks for app.ini (it sets GITEA_CUSTOM=/data/gitea).
+forgejo_config_dir: /etc/forgejo
+forgejo_data_dir: /var/lib/forgejo
+
+# The container drops to this account's uid and gid, so the data tree it writes
+# is readable from the host without root.
+forgejo_user: forgejo
+
+# =============================================================================
+# Git over SSH
+# =============================================================================
+# Forgejo runs its own SSH server inside the container: a Go implementation that
+# only ever serves the four git commands, never a shell, and authenticates
+# against the keys in its database. So this needs no host sshd hook and no
+# authorized_keys file — and host port 22 is free, since sshd was moved to
+# ssh_port, which is what keeps the clone URL free of a :port suffix.
+#
+# This is the one published port in the estate that is not on the loopback:
+# `git push` has to reach it from outside and Caddy cannot proxy the SSH
+# transport. Docker writes its own iptables rules, so publishing here opens 22
+# to the internet whatever UFW says. Set forgejo_ssh_publish_address to
+# 127.0.0.1 to reduce it to a tunnel-only port, or flip forgejo_ssh_enabled to
+# false to drop git+SSH entirely and clone over HTTPS with a token.
+forgejo_ssh_enabled: true
+forgejo_ssh_publish_address: "0.0.0.0"
+forgejo_ssh_port: 22
+
+# Inside the container the builtin server cannot have 22: the rootful image runs
+# its own OpenSSH there under s6, whatever app.ini says, and the builtin server
+# then dies on "bind: address already in use" and takes the whole process down
+# with it. It listens here instead, and only this port is published — the
+# image's sshd stays unreachable.
+forgejo_ssh_listen_port: 2222
+
+forgejo_published_ports: >-
+  {{ [docker_publish_address ~ ':' ~ forgejo_web_port ~ ':3000']
+     + ([forgejo_ssh_publish_address ~ ':' ~ forgejo_ssh_port ~ ':' ~ forgejo_ssh_listen_port]
+        if forgejo_ssh_enabled | bool else []) }}
+
+# =============================================================================
+# Who gets in
+# =============================================================================
+# Authelia is the only front door: the password form is gone from the web UI and
+# accounts are created on first OIDC login. Break glass when Authelia itself is
+# broken — flip this to true for one run, sign in with a local account made by
+# `forgejo admin user create`, fix, flip it back.
+forgejo_enable_internal_signin: false
+
+# HTTP basic authentication stays on. It is how `git clone https://…`, the API
+# and the container registry authenticate, with a personal access token in place
+# of the password — requests Authelia never sees, which is exactly why the vhost
+# is not behind forward_auth. Turning it off buys nothing and breaks all three.
+forgejo_enable_basic_authentication: true
+
+# Nothing is public: no anonymous repository browsing, no anonymous API.
+forgejo_require_signin_view: true
+
+# Code search over a bleve index. Cheap for a handful of repositories, and the
+# single best reason to run a forge with a web interface rather than bare git.
+forgejo_repo_indexer: true
+
+# Forgejo Actions. Left off: enabling it without a registered runner only fills
+# a queue nothing drains. Turning it on is a separate decision, and a runner is
+# a separate role.
+forgejo_actions_enabled: false
+
+# Forgejo's own OAuth2 *provider* — the one third-party apps would log in
+# against. Authelia is the identity provider here, so it stays off. Its JWT
+# secret is in the vault all the same: Forgejo generates one and writes it into
+# app.ini even when the provider is disabled.
+forgejo_oauth2_provider_enabled: false
+
+# =============================================================================
+# The Authelia authentication source
+# =============================================================================
+forgejo_oidc_configure: true
+forgejo_oidc_source_name: authelia
+forgejo_oidc_client_id: forgejo
+forgejo_oidc_scopes: "openid email profile groups"
+
+# Group-driven administration: whoever carries this group in the Authelia claim
+# is an admin in Forgejo, and loses it when the group is removed from the vault.
+# It has to match a group in vault_authelia_users, and the `groups` scope has to
+# be granted to the client, or the claim never arrives and everyone lands as a
+# plain user.
+forgejo_oidc_group_claim: groups
+forgejo_oidc_admin_group: admins
+forgejo_oidc_restricted_group: ""
+
+# Leave false: Forgejo's own TOTP still applies on top of Authelia for anyone
+# who enrolled one. Setting it true hands the whole second factor to Authelia,
+# which is only a good trade once that client's authorization_policy is
+# two_factor.
+forgejo_oidc_skip_local_2fa: false
+
+# add-oauth runs once, when no source by that name exists. The CLI cannot tell
+# us whether the stored source still matches what is configured here, so the
+# update is deliberate: flip this to true for a single run after changing the
+# client secret, the Authelia domain or the group mapping.
+forgejo_oidc_update: false
+
+# The add-oauth and update-oauth command lines carry the client secret.
+# forgejo_no_log=false for one run to see why one of them failed — it prints the
+# secret in the terminal, so only to diagnose.
+forgejo_no_log: true
+
+# How long to wait for the web interface to answer before wiring the source.
+# First boot runs every database migration, which is not instant.
+forgejo_wait_retries: 40
+forgejo_wait_delay: 5
+
+# Inherited from group_vars; defaulted here so the role still renders on its own.
+authelia_domain: authelia.alexandre-gerault.fr
+docker_publish_address: "127.0.0.1"
+common_timezone: Etc/UTC
+# Caddy reaches the container from the docker bridge, not from 127.0.0.1, so the
+# trusted-proxy list has to cover the address pool from docker_daemon_options.
+docker_address_pool: 10.0.0.0/8

@@ -1,0 +1,97 @@
+---
+# A git forge with a web interface, behind Authelia — but not behind Caddy's
+# forward_auth. That distinction is the whole design of this role: forward_auth
+# bounces every request without a session cookie to the login portal, which is
+# fine for a dashboard and fatal for a forge. `git clone`, `git push`, the API
+# and the webhooks all speak to it without a browser, so the vhost carries no
+# `protect: true` and Authelia sits one level deeper instead, as the OpenID
+# Connect provider Forgejo delegates its login page to.
+#
+# Everything else follows from that: registration is open but external-only so
+# an Authelia account is the only way in, HTTP basic auth stays on so tokens
+# keep working, and the `admins` group in the vault is what grants
+# administration here too.
+
+- name: Check the vault holds the forgejo secrets
+  ansible.builtin.assert:
+    that:
+      - vault_forgejo_secret_key | default('') | length >= 32
+      - vault_forgejo_internal_token | default('') | length >= 32
+      - vault_forgejo_lfs_jwt_secret | default('') | length >= 32
+      - vault_forgejo_oauth2_jwt_secret | default('') | length >= 32
+      - vault_forgejo_oidc_client_secret | default('') | length >= 32
+    fail_msg: >-
+      Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_forgejo_secret_key, vault_forgejo_internal_token,
+      vault_forgejo_lfs_jwt_secret and vault_forgejo_oauth2_jwt_secret — from
+      `docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret
+      SECRET_KEY`, `… INTERNAL_TOKEN` and `… JWT_SECRET` (twice) — plus
+      vault_forgejo_oidc_client_secret, the OpenID Connect client secret in
+      clear, whose pbkdf2 digest goes in vault_forgejo_oidc_client_secret_digest
+      for Authelia. Both come out of one command; see the README.
+    quiet: true
+
+- name: Create the forgejo service account
+  ansible.builtin.user:
+    name: "{{ forgejo_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: "{{ forgejo_data_dir }}"
+  register: forgejo_account
+
+- name: Read the forgejo group
+  ansible.builtin.group:
+    name: "{{ forgejo_user }}"
+  register: forgejo_group_state
+
+- name: Ensure the forgejo directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ forgejo_user }}"
+    group: "{{ forgejo_user }}"
+    mode: "0750"
+  loop:
+    - "{{ forgejo_config_dir }}"
+    - "{{ forgejo_data_dir }}"
+
+# Owned by the service account, not root: the container runs as this uid and has
+# to read it, and the entrypoint rewrites it in place when a FORGEJO__* variable
+# is set — none are, but the file still has to be writable for that pass to
+# succeed instead of aborting the boot.
+- name: Deploy the forgejo configuration
+  ansible.builtin.template:
+    src: app.ini.j2
+    dest: "{{ forgejo_config_dir }}/app.ini"
+    owner: "{{ forgejo_user }}"
+    group: "{{ forgejo_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart forgejo
+
+# /etc/forgejo is mounted *over* /data/gitea/conf, inside the /data mount.
+# Docker orders bind mounts by target depth, so the nested one wins, and app.ini
+# ends up somewhere Ansible owns rather than buried in the data tree.
+- name: Run the forgejo container
+  community.docker.docker_container:
+    name: forgejo
+    image: "{{ forgejo_image }}"
+    state: started
+    restart_policy: unless-stopped
+    ports: "{{ forgejo_published_ports }}"
+    env:
+      USER_UID: "{{ forgejo_account.uid | string }}"
+      USER_GID: "{{ forgejo_group_state.gid | string }}"
+      TZ: "{{ common_timezone }}"
+    mounts:
+      - type: bind
+        source: "{{ forgejo_data_dir }}"
+        target: /data
+      - type: bind
+        source: "{{ forgejo_config_dir }}"
+        target: /data/gitea/conf
+
+- name: Wire the Authelia authentication source
+  ansible.builtin.include_tasks: oidc.yml
+  when: forgejo_oidc_configure | bool

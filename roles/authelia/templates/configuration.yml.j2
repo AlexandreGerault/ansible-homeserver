@@ -60,3 +60,48 @@ notifier:
   disable_startup_check: false
   filesystem:
     filename: /data/notification.txt
+{% if authelia_oidc_clients | length > 0 %}
+
+# Authelia as an OpenID Connect provider. This is how an application that is not
+# a browser-only web interface is put behind the SSO: Caddy's forward_auth would
+# bounce its API calls and its git transport, so the application delegates its
+# own login page here instead and keeps its own tokens for everything else.
+identity_providers:
+  oidc:
+    # The RSA private key ID tokens are signed with. jwks is a list of objects,
+    # and Authelia cannot read list members from environment variables, so this
+    # is the one secret that has to come through the config file — mounted as a
+    # file and pulled in by the template filter, never written in here.
+    jwks:
+      - key: {% raw %}{{ secret "/secrets/OIDC_JWK" | mindent 10 "|" | msquote }}{% endraw %}
+
+    clients:
+{% for client in authelia_oidc_clients %}
+      - client_id: '{{ client.id }}'
+        client_name: '{{ client.name }}'
+        # A pbkdf2 digest, not the secret: the client holds the clear value.
+        client_secret: '{{ client.secret_digest }}'
+        public: false
+        authorization_policy: '{{ client.policy | default('one_factor') }}'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        redirect_uris:
+{% for uri in client.redirect_uris %}
+          - '{{ uri }}'
+{% endfor %}
+        scopes:
+{% for scope in client.scopes | default(['openid', 'email', 'profile', 'groups']) %}
+          - '{{ scope }}'
+{% endfor %}
+        response_types:
+          - 'code'
+        grant_types:
+          - 'authorization_code'
+        # Unsigned access tokens and userinfo responses: the clients here read
+        # the claims straight out of the userinfo endpoint over TLS and do not
+        # implement JWT-signed variants.
+        access_token_signed_response_alg: 'none'
+        userinfo_signed_response_alg: 'none'
+        token_endpoint_auth_method: 'client_secret_basic'
+{% endfor %}
+{% endif %}

@@ -3,6 +3,22 @@
 # 71KB upstream template, so every mandatory section was missing, and the
 # container published 9091 while the Caddy vhost proxied to 8098.
 
+- name: Check the vault holds the OpenID Connect secrets
+  ansible.builtin.assert:
+    that:
+      - vault_authelia_oidc_hmac_secret | default('') | length >= 32
+      - vault_authelia_oidc_jwk | default('') is search('PRIVATE KEY')
+      - authelia_oidc_clients | map(attribute='secret_digest', default='')
+        | select | length == authelia_oidc_clients | length
+    fail_msg: >-
+      authelia_oidc_clients is not empty, so the provider needs its own two
+      secrets in group_vars/all/vault.yml: vault_authelia_oidc_hmac_secret, and
+      vault_authelia_oidc_jwk, an RSA private key as a PEM block scalar from
+      `authelia crypto pair rsa generate`. Every client also needs a
+      secret_digest. See the README.
+    quiet: true
+  when: authelia_oidc_clients | length > 0
+
 - name: Ensure the authelia directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -39,6 +55,29 @@
   no_log: true
   notify: Restart authelia
 
+# Only when a client is configured. The HMAC secret signs the OpenID Connect
+# tokens; the PEM is the RSA private key the ID tokens are signed with, and
+# rotating it invalidates every session and every authorization code in flight.
+# Both are deployed apart from the three above because Authelia refuses to start
+# when AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE points at nothing.
+- name: Deploy the OpenID Connect secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ authelia_config_dir }}/secrets/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - name: OIDC_HMAC_SECRET
+      value: "{{ vault_authelia_oidc_hmac_secret | default('') }}"
+    - name: OIDC_JWK
+      value: "{{ vault_authelia_oidc_jwk | default('') }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: authelia_oidc_clients | length > 0
+  no_log: true
+  notify: Restart authelia
+
 - name: Deploy the authelia configuration
   ansible.builtin.template:
     src: configuration.yml.j2
@@ -66,11 +105,11 @@
     restart_policy: unless-stopped
     ports:
       - "{{ docker_publish_address }}:{{ authelia_port }}:9091"
-    env:
-      X_AUTHELIA_CONFIG: /config/configuration.yml
-      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/JWT_SECRET
-      AUTHELIA_SESSION_SECRET_FILE: /secrets/SESSION_SECRET
-      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/STORAGE_ENCRYPTION_KEY
+    env: >-
+      {{ authelia_base_env
+         | combine({'AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE':
+                    '/secrets/OIDC_HMAC_SECRET'}
+                   if authelia_oidc_clients | length > 0 else {}) }}
     mounts:
       - type: bind
         source: "{{ authelia_config_dir }}/configuration.yml"

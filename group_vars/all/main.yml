@@ -157,6 +157,15 @@ caddy_sites:
     domain: requests.alexandre-gerault.fr
     upstream_port: 5055
     log: true
+  # Deliberately not `protect: true`. forward_auth answers a request without a
+  # session cookie with a redirect to the login portal, which is the right thing
+  # for a web interface and the wrong thing for `git clone`, for the API and for
+  # every webhook. Forgejo delegates its login page to Authelia over OpenID
+  # Connect instead, so the SSO still guards the browser path.
+  - name: forgejo
+    domain: git.alexandre-gerault.fr
+    upstream_port: 3030
+    log: true
 
 # =============================================================================
 # Authelia — SSO. Add `protect: true` to a caddy_sites entry to put it behind
@@ -167,6 +176,19 @@ authelia_domain: authelia.alexandre-gerault.fr
 authelia_root_domain: alexandre-gerault.fr
 authelia_default_redirect: https://dashboard.homelab.alexandre-gerault.fr
 caddy_authelia_upstream: "127.0.0.1:8098"
+
+# Applications that log in *through* Authelia instead of sitting behind
+# forward_auth. one_factor for Forgejo, to match the wildcard access rule: the
+# notifier writes to a file on the server rather than sending mail, so enrolling
+# a TOTP device means going and reading /var/lib/authelia/notification.txt by
+# hand. Move it to two_factor once that enrolment is done.
+authelia_oidc_clients:
+  - id: forgejo
+    name: Forgejo
+    secret_digest: "{{ vault_forgejo_oidc_client_secret_digest }}"
+    policy: one_factor
+    redirect_uris:
+      - "https://git.alexandre-gerault.fr/user/oauth2/authelia/callback"
 
 # =============================================================================
 # Jellyfin
@@ -227,6 +249,25 @@ arr_root_folders:
     path: /data/anime
   - app: radarr
     path: /data/movie
+
+# =============================================================================
+# Forgejo — the git forge. Not behind forward_auth: see the caddy_sites comment
+# above and roles/forgejo/tasks/main.yml.
+# =============================================================================
+forgejo_domain: git.alexandre-gerault.fr
+forgejo_web_port: 3030
+
+# git+SSH on host port 22, which is free because sshd listens on ssh_port. This
+# is the only container port published anywhere but the loopback, and Docker's
+# own iptables rules mean UFW does not cover it: what answers there is Forgejo's
+# builtin SSH server, key auth only, git commands only, no shell.
+forgejo_ssh_enabled: true
+forgejo_ssh_publish_address: "0.0.0.0"
+forgejo_ssh_port: 22
+
+# Whoever carries this Authelia group is an administrator in Forgejo. It has to
+# exist in vault_authelia_users.
+forgejo_oidc_admin_group: admins
 
 # =============================================================================
 # Homepage

@@ -28,6 +28,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `arr_stack` | Prowlarr, Sonarr, Radarr, Bazarr and Jellyseerr, plus the wiring between them |
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
 | `authelia` | The SSO portal: configuration, users database, secrets, container |
+| `forgejo` | The git forge, its `app.ini` and the Authelia authentication source |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
@@ -49,6 +50,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `radarr.alexandre-gerault.fr` | radarr, 7878 — **behind the SSO** |
 | `bazarr.alexandre-gerault.fr` | bazarr, 6767 — **behind the SSO** |
 | `requests.alexandre-gerault.fr` | jellyseerr, 5055 — authenticates against Jellyfin instead |
+| `git.alexandre-gerault.fr` | forgejo, 3030 — SSO through OpenID Connect, *not* forward_auth |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
 ## Variables
@@ -77,6 +79,10 @@ The vault holds:
 | `vault_qbittorrent_password_pbkdf2` | `qbittorrent` — the WebUI password, PBKDF2 |
 | `vault_qbittorrent_webui_password` | `arr_stack` and `homepage` — the same WebUI password in clear, which is what Sonarr and Radarr log in with |
 | `vault_prowlarr_api_key`, `vault_sonarr_api_key`, `vault_radarr_api_key`, `vault_bazarr_api_key` | `arr_stack` and `homepage` — 32 hex characters each |
+| `vault_authelia_oidc_hmac_secret`, `vault_authelia_oidc_jwk` | `authelia` — the OpenID Connect provider: token HMAC secret and the RSA signing key, as a PEM block scalar |
+| `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
+| `vault_forgejo_oidc_client_secret` | `forgejo` — the OpenID Connect client secret, in clear |
+| `vault_forgejo_oidc_client_secret_digest` | `authelia` — the pbkdf2 digest of that same secret |
 
 The four *arr keys are yours to pick rather than the applications': generating
 them here is what lets the playbook wire Prowlarr to Sonarr and Radarr, and lets
@@ -106,6 +112,69 @@ image itself and put it in the vault:
 docker run --rm ghcr.io/authelia/authelia:4.38 \
   authelia crypto hash generate argon2 --password 'the-password'
 ```
+
+## The git forge
+
+`git.alexandre-gerault.fr` is Forgejo, and it is the one service behind the SSO
+that carries no `protect: true`. That is deliberate, and it is worth
+understanding before "fixing" it:
+
+`forward_auth` answers any request without a session cookie with a redirect to
+the login portal. A browser follows it; `git clone`, `git push`, the API, the
+container registry and every webhook do not — they get a 302 and an HTML page
+where they expected a git protocol, a JSON body or a token challenge. So
+Authelia guards Forgejo one level deeper instead: it is Forgejo's **OpenID
+Connect provider**, which covers the browser path (the login page is the
+Authelia portal), while tokens and SSH keys cover everything else.
+
+Consequences worth remembering:
+
+- **The password form is gone** (`ENABLE_INTERNAL_SIGNIN = false`) and accounts
+  are created on first login through Authelia, not by registering. An account in
+  `vault_authelia_users` is the only way in.
+- **The `admins` group grants administration.** It comes over as the `groups`
+  claim; drop it from the vault and the next login is a plain user.
+- **git over SSH is on host port 22**, which is free because sshd listens on
+  `ssh_port`. What answers there is Forgejo's builtin SSH server — key auth
+  only, git commands only, no shell — and it is the only container port
+  published off the loopback. Inside the container it listens on 2222: the
+  image's own OpenSSH already holds 22 there.
+- **HTTP basic auth stays on**, because that is how a personal access token
+  authenticates a clone over HTTPS.
+
+### The secrets it needs
+
+Five for Forgejo, two for Authelia's provider, one pair shared between them.
+
+```bash
+# Forgejo, one per vault entry. JWT_SECRET twice: the LFS one and the OAuth2
+# one, which Forgejo generates and writes into app.ini even with its OAuth2
+# provider disabled — so it is pinned too, or every run would restart it
+docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret SECRET_KEY
+docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret INTERNAL_TOKEN
+docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret JWT_SECRET
+docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret JWT_SECRET
+
+# Authelia's OpenID Connect signing key — private.pem goes in the vault as a
+# block scalar, public.pem is not needed anywhere
+docker run --rm -v "$PWD:/keys" ghcr.io/authelia/authelia:4.39 \
+  authelia crypto pair rsa generate --bits 2048 --directory /keys
+
+# The HMAC secret. alphanumeric on purpose: it lands in a YAML file and in an
+# HTTP header, and this way neither has to quote or encode anything
+docker run --rm ghcr.io/authelia/authelia:4.39 \
+  authelia crypto rand --length 64 --charset alphanumeric
+
+# The client secret and its digest, in one shot: "Random Password" goes to
+# vault_forgejo_oidc_client_secret, "Digest" to …_client_secret_digest
+docker run --rm ghcr.io/authelia/authelia:4.39 \
+  authelia crypto hash generate pbkdf2 --variant sha512 --random \
+    --random.length 72 --random.charset rfc3986
+```
+
+Changing the client secret afterwards means telling Forgejo about it: the
+authentication source lives in its database, not in a file, so set
+`forgejo_oidc_update: true` for one run.
 
 ## The torrent client and its VPN
 
@@ -372,6 +441,9 @@ Fixed, applied and verified on the machine on 2026-08-26:
   mailcatcher, which serves every mail the instance sends, with no
   authentication, including invitation and password reset links. Re-probing
   after the run on 2026-08-26: all closed, only 80, 443 and the SSH port answer.
+  Since 2026-09-15 port 22 answers too, and deliberately: it is Forgejo's
+  builtin git SSH server (see "The git forge"), published on `0.0.0.0`. The
+  re-probe that day found 22, 80, 443 and the SSH port open, plus 8096 (below).
 
   Jellyfin moves from host to bridge networking for the same reason. That costs
   DLNA and client auto-discovery on the LAN, recoverable with

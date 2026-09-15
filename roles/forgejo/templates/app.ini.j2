@@ -1,0 +1,158 @@
+; {{ ansible_managed }}
+;
+; Ansible owns this file. Forgejo rewrites app.ini itself whenever it has to
+; persist a value it generated, which is why SECRET_KEY, INTERNAL_TOKEN and the
+; LFS JWT secret are all spelled out: leave one empty and the container writes
+; its own on first boot, the next playbook run overwrites it, and everything
+; that was encrypted with it — stored TOTP secrets, mirror credentials — stops
+; decrypting. Unlike Authelia's configuration.yml, this file therefore holds
+; secrets; it is mode 0640 and owned by the service account for that reason.
+
+APP_NAME = {{ forgejo_app_name }}
+RUN_USER = git
+RUN_MODE = prod
+; Forgejo writes this line in itself when it is missing, which would make every
+; run report a change and restart the container.
+WORK_PATH = /data/gitea
+
+[repository]
+ROOT = /data/git/repositories
+DEFAULT_BRANCH = main
+; A forge on a home connection is private by default. Flipping a repository to
+; public is a deliberate click, not the consequence of forgetting a checkbox.
+DEFAULT_PRIVATE = private
+DEFAULT_PUSH_CREATE_PRIVATE = true
+
+[repository.local]
+LOCAL_COPY_PATH = /data/gitea/tmp/local-repo
+
+[repository.upload]
+TEMP_PATH = /data/gitea/uploads
+
+[server]
+APP_DATA_PATH = /data/gitea
+; Caddy terminates TLS and talks plain HTTP to the loopback, like every other
+; upstream here. ROOT_URL is still https: it is what ends up in clone URLs,
+; webhook payloads and the OIDC callback.
+PROTOCOL = http
+DOMAIN = {{ forgejo_domain }}
+ROOT_URL = https://{{ forgejo_domain }}/
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = 3000
+LANDING_PAGE = login
+; No call home, no Gravatar, no remote assets.
+OFFLINE_MODE = true
+
+DISABLE_SSH = {{ (not (forgejo_ssh_enabled | bool)) | lower }}
+{% if forgejo_ssh_enabled | bool %}
+START_SSH_SERVER = true
+BUILTIN_SSH_SERVER_USER = git
+SSH_DOMAIN = {{ forgejo_domain }}
+; SSH_PORT is what the clone URL advertises (the host port), SSH_LISTEN_PORT is
+; what the builtin server binds inside the container — not 22, which the
+; image's own OpenSSH already holds.
+SSH_PORT = {{ forgejo_ssh_port }}
+SSH_LISTEN_PORT = {{ forgejo_ssh_listen_port }}
+; The builtin server authenticates against the keys in the database, so there is
+; no authorized_keys file to keep in sync.
+SSH_CREATE_AUTHORIZED_KEYS_FILE = false
+{% endif %}
+
+LFS_START_SERVER = true
+LFS_JWT_SECRET = {{ vault_forgejo_lfs_jwt_secret }}
+
+[database]
+DB_TYPE = sqlite3
+PATH = /data/gitea/forgejo.db
+LOG_SQL = false
+
+[indexer]
+ISSUE_INDEXER_PATH = /data/gitea/indexers/issues.bleve
+REPO_INDEXER_ENABLED = {{ forgejo_repo_indexer | bool | lower }}
+REPO_INDEXER_PATH = /data/gitea/indexers/repos.bleve
+
+[queue]
+TYPE = level
+DATADIR = /data/gitea/queues
+
+[session]
+PROVIDER = file
+PROVIDER_CONFIG = /data/gitea/sessions
+COOKIE_SECURE = true
+
+[picture]
+AVATAR_UPLOAD_PATH = /data/gitea/avatars
+REPOSITORY_AVATAR_UPLOAD_PATH = /data/gitea/repo-avatars
+
+[attachment]
+PATH = /data/gitea/attachments
+
+[log]
+MODE = console
+LEVEL = info
+ROOT_PATH = /data/gitea/log
+
+[security]
+; The installer web page is what runs on an unconfigured instance. It would let
+; whoever reaches the vhost first create the admin account.
+INSTALL_LOCK = true
+SECRET_KEY = {{ vault_forgejo_secret_key }}
+INTERNAL_TOKEN = {{ vault_forgejo_internal_token }}
+LOGIN_REMEMBER_DAYS = 7
+; Caddy runs on the host and proxies to a published port, so from inside the
+; container every request arrives from the docker bridge gateway rather than
+; from 127.0.0.1. Without the pool in this list, X-Forwarded-For is ignored,
+; the rate limiter sees one client for the whole internet and the audit log
+; records the gateway address for every push.
+REVERSE_PROXY_LIMIT = 1
+REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.0/8,{{ docker_address_pool }}
+
+[service]
+; These two are not the same knob and only work as a pair: DISABLE_REGISTRATION
+; would block the OIDC sign-up too, so registration stays open and is then
+; narrowed to third-party sources only. Result: an Authelia account is the only
+; way an account comes into being.
+DISABLE_REGISTRATION = false
+ALLOW_ONLY_EXTERNAL_REGISTRATION = true
+ENABLE_INTERNAL_SIGNIN = {{ forgejo_enable_internal_signin | bool | lower }}
+ENABLE_BASIC_AUTHENTICATION = {{ forgejo_enable_basic_authentication | bool | lower }}
+REQUIRE_SIGNIN_VIEW = {{ forgejo_require_signin_view | bool | lower }}
+; No mailer is configured, so anything that waits on an email has to be off or
+; accounts would be created and never confirmed.
+REGISTER_EMAIL_CONFIRM = false
+ENABLE_NOTIFY_MAIL = false
+DEFAULT_KEEP_EMAIL_PRIVATE = true
+DEFAULT_ALLOW_CREATE_ORGANIZATION = true
+NO_REPLY_ADDRESS = noreply.{{ forgejo_domain }}
+
+[oauth2_client]
+; First login through Authelia creates the account instead of 404-ing on it.
+ENABLE_AUTO_REGISTRATION = true
+; From the preferred_username claim, which Authelia fills with the account name
+; in vault_authelia_users — not the email, and not a numeric subject.
+USERNAME = nickname
+; Link to an existing local account when the email matches, rather than
+; refusing the login. Safe here: Authelia is the only source of those emails.
+ACCOUNT_LINKING = auto
+UPDATE_AVATAR = false
+
+[oauth2]
+ENABLED = {{ forgejo_oauth2_provider_enabled | bool | lower }}
+; Generated and written back even with the provider disabled, so it is pinned
+; here for the same reason as the three above.
+JWT_SECRET = {{ vault_forgejo_oauth2_jwt_secret }}
+
+[mailer]
+ENABLED = false
+
+[actions]
+ENABLED = {{ forgejo_actions_enabled | bool | lower }}
+
+[federation]
+ENABLED = false
+
+[cron.update_checker]
+ENABLED = false
+
+[ui]
+DEFAULT_THEME = forgejo-auto
