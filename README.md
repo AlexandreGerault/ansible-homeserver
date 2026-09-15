@@ -70,6 +70,7 @@ The vault holds:
 | `vault_ssh_authorized_keys` | `ssh` — a dict of account name to list of public keys |
 | `vault_homepage_jellyfin_api_key` | `homepage` — the Jellyfin widget |
 | `vault_affine_db_password` | `compose_app` — affine's Postgres |
+| `vault_smtp_password` | `authelia`, `forgejo`, `compose_app` (affine) — the `homeserver@alexandre-gerault.fr` mailbox on the mail server |
 | `vault_scholarsome_database_password`, `vault_scholarsome_jwt_secret` | `compose_app` — scholarsome |
 | `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
 | `vault_authelia_jwt_secret`, `vault_authelia_session_secret`, `vault_authelia_storage_encryption_key` | `authelia` |
@@ -175,6 +176,26 @@ docker run --rm ghcr.io/authelia/authelia:4.39 \
 Changing the client secret afterwards means telling Forgejo about it: the
 authentication source lives in its database, not in a file, so set
 `forgejo_oidc_update: true` for one run.
+
+## Outgoing mail
+
+Authelia, Forgejo and AFFiNE send mail through one account,
+`homeserver@alexandre-gerault.fr` on `mail.alexandre-gerault.fr`, port 465 (TLS
+from the first byte), as `Homeserver <noreply@alexandre-gerault.fr>`. The
+settings are the `smtp_*` variables in `group_vars/all/main.yml`, the password
+is `vault_smtp_password`.
+
+- **Authelia** sends identity verification (TOTP enrolment, password reset).
+  Its startup check is off (`authelia_smtp_startup_check: false`): the portal
+  starts even when the mail server is down, and only the mails sent meanwhile
+  fail, logged as errors. The flip side is that a wrong SMTP password surfaces
+  at the first mail rather than at deploy time.
+- **Forgejo** sends notifications for issues, pull requests and mentions.
+- **AFFiNE** sends invitations and sign-in links, built from
+  `affine_external_url`.
+
+Setting `smtp_host` to an empty string puts all three back on no mail, Authelia
+on its file notifier.
 
 ## The torrent client and its VPN
 

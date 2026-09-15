@@ -19,6 +19,16 @@
     quiet: true
   when: authelia_oidc_clients | length > 0
 
+- name: Check the vault holds the SMTP password
+  ansible.builtin.assert:
+    that:
+      - vault_smtp_password | default('') | length > 0
+    fail_msg: >-
+      smtp_host is set, so the notifier needs vault_smtp_password in
+      group_vars/all/vault.yml.
+    quiet: true
+  when: smtp_host | length > 0
+
 - name: Ensure the authelia directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -78,6 +88,17 @@
   no_log: true
   notify: Restart authelia
 
+- name: Deploy the SMTP password
+  ansible.builtin.copy:
+    content: "{{ vault_smtp_password }}"
+    dest: "{{ authelia_config_dir }}/secrets/SMTP_PASSWORD"
+    owner: root
+    group: root
+    mode: "0600"
+  when: smtp_host | length > 0
+  no_log: true
+  notify: Restart authelia
+
 - name: Deploy the authelia configuration
   ansible.builtin.template:
     src: configuration.yml.j2
@@ -109,7 +130,9 @@
       {{ authelia_base_env
          | combine({'AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE':
                     '/secrets/OIDC_HMAC_SECRET'}
-                   if authelia_oidc_clients | length > 0 else {}) }}
+                   if authelia_oidc_clients | length > 0 else {})
+         | combine({'AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE': '/secrets/SMTP_PASSWORD'}
+                   if smtp_host | length > 0 else {}) }}
     mounts:
       - type: bind
         source: "{{ authelia_config_dir }}/configuration.yml"

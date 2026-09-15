@@ -117,10 +117,11 @@ ALLOW_ONLY_EXTERNAL_REGISTRATION = true
 ENABLE_INTERNAL_SIGNIN = {{ forgejo_enable_internal_signin | bool | lower }}
 ENABLE_BASIC_AUTHENTICATION = {{ forgejo_enable_basic_authentication | bool | lower }}
 REQUIRE_SIGNIN_VIEW = {{ forgejo_require_signin_view | bool | lower }}
-; No mailer is configured, so anything that waits on an email has to be off or
-; accounts would be created and never confirmed.
+; Stays off with a mailer too: accounts come from Authelia, which already owns
+; the address, and a confirmation step would only stand between a first login
+; and the account it creates.
 REGISTER_EMAIL_CONFIRM = false
-ENABLE_NOTIFY_MAIL = false
+ENABLE_NOTIFY_MAIL = {{ forgejo_mailer_enabled | bool | lower }}
 DEFAULT_KEEP_EMAIL_PRIVATE = true
 DEFAULT_ALLOW_CREATE_ORGANIZATION = true
 NO_REPLY_ADDRESS = noreply.{{ forgejo_domain }}
@@ -143,7 +144,19 @@ ENABLED = {{ forgejo_oauth2_provider_enabled | bool | lower }}
 JWT_SECRET = {{ vault_forgejo_oauth2_jwt_secret }}
 
 [mailer]
-ENABLED = false
+ENABLED = {{ forgejo_mailer_enabled | bool | lower }}
+{% if forgejo_mailer_enabled | bool %}
+; smtps is TLS from the first byte (465), smtp+starttls upgrades on 587.
+PROTOCOL = {{ 'smtps' if smtp_port | int == 465 else 'smtp+starttls' }}
+SMTP_ADDR = {{ smtp_host }}
+SMTP_PORT = {{ smtp_port }}
+; Otherwise the HELO carries the container's hostname, a random hex id.
+HELO_HOSTNAME = {{ forgejo_domain }}
+USER = {{ smtp_username }}
+; Backticks: the ini parser would otherwise cut the value at a # or a ;.
+PASSWD = `{{ vault_smtp_password }}`
+FROM = {{ smtp_sender }}
+{% endif %}
 
 [actions]
 ENABLED = {{ forgejo_actions_enabled | bool | lower }}

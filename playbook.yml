@@ -33,9 +33,14 @@
       tags: [arbitrage_ffv, apps]
 
   tasks:
+    # include_role is dynamic: the tags below select the include itself, not the
+    # tasks it pulls in, so without `apply` a `--tags compose` run includes the
+    # role and then skips every one of its tasks.
     - name: Deploy the docker compose applications
       ansible.builtin.include_role:
         name: compose_app
+        apply:
+          tags: [compose, apps]
       vars:
         compose_app: "{{ stack }}"
       loop: "{{ compose_apps }}"

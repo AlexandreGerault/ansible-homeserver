@@ -84,6 +84,17 @@ forgejo_actions_enabled: false
 forgejo_oauth2_provider_enabled: false
 
 # =============================================================================
+# Mail
+# =============================================================================
+# Notifications for issues, pull requests and mentions, through the shared SMTP
+# account from group_vars. On as soon as smtp_host is set.
+smtp_host: ""
+smtp_port: 465
+smtp_username: ""
+smtp_sender: ""
+forgejo_mailer_enabled: "{{ smtp_host | length > 0 }}"
+
+# =============================================================================
 # The Authelia authentication source
 # =============================================================================
 forgejo_oidc_configure: true

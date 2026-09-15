@@ -178,10 +178,9 @@ authelia_default_redirect: https://dashboard.homelab.alexandre-gerault.fr
 caddy_authelia_upstream: "127.0.0.1:8098"
 
 # Applications that log in *through* Authelia instead of sitting behind
-# forward_auth. one_factor for Forgejo, to match the wildcard access rule: the
-# notifier writes to a file on the server rather than sending mail, so enrolling
-# a TOTP device means going and reading /var/lib/authelia/notification.txt by
-# hand. Move it to two_factor once that enrolment is done.
+# forward_auth. one_factor for Forgejo, to match the wildcard access rule. Now
+# that the notifier sends real mail, every user can enrol a TOTP device on their
+# own; move it to two_factor once they all have.
 authelia_oidc_clients:
   - id: forgejo
     name: Forgejo
@@ -189,6 +188,18 @@ authelia_oidc_clients:
     policy: one_factor
     redirect_uris:
       - "https://git.alexandre-gerault.fr/user/oauth2/authelia/callback"
+
+# =============================================================================
+# Outgoing mail — one account on the mail server, shared by Authelia, Forgejo
+# and AFFiNE. Its password is vault_smtp_password. Port 465 is TLS from the
+# first byte (checked 2026-09-15: Let's Encrypt certificate, AUTH accepted, and
+# noreply@ accepted as a sender for this login); 587 with STARTTLS answers too.
+# Empty smtp_host puts every consumer back on "no mail".
+# =============================================================================
+smtp_host: mail.alexandre-gerault.fr
+smtp_port: 465
+smtp_username: homeserver@alexandre-gerault.fr
+smtp_sender: "Homeserver <noreply@alexandre-gerault.fr>"
 
 # =============================================================================
 # Jellyfin
@@ -305,3 +316,6 @@ compose_apps:
   - name: affine
     compose_file: docker-compose.yml
     env: true
+
+# What AFFiNE builds the links in its mails from.
+affine_external_url: https://affine.alexandre-gerault.fr

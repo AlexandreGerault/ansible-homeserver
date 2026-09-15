@@ -32,6 +32,22 @@ authelia_base_env:
   AUTHELIA_SESSION_SECRET_FILE: /secrets/SESSION_SECRET
   AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/STORAGE_ENCRYPTION_KEY
 
+# Outgoing mail. Empty smtp_host keeps the filesystem notifier, which writes
+# every message to /var/lib/authelia/notification.txt instead of sending it.
+smtp_host: ""
+smtp_port: 465
+smtp_username: ""
+smtp_sender: ""
+
+# With the check on, Authelia connects to the mail server at startup and refuses
+# to start when it cannot — the portal, and every protect: true vhost, would go
+# down with the mail server. Off: Authelia starts regardless and still sends
+# every mail through SMTP; a mail server that is down only fails the messages
+# sent while it is, each one logged as an error. The price is that a wrong
+# password no longer shows at deploy time, but at the first mail — check the
+# log after changing vault_smtp_password.
+authelia_smtp_startup_check: false
+
 # OpenID Connect clients. Empty means the provider is not configured at all —
 # the whole identity_providers section disappears from the configuration, and no
 # signing key or HMAC secret is needed.

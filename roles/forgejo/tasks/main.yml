@@ -31,6 +31,18 @@
       for Authelia. Both come out of one command; see the README.
     quiet: true
 
+- name: Check the vault holds the SMTP password
+  ansible.builtin.assert:
+    that:
+      - vault_smtp_password | default('') | length > 0
+      - "'`' not in vault_smtp_password"
+    fail_msg: >-
+      forgejo_mailer_enabled is true, so app.ini needs vault_smtp_password from
+      group_vars/all/vault.yml — without a backtick, which is how the value is
+      quoted there.
+    quiet: true
+  when: forgejo_mailer_enabled | bool
+
 - name: Create the forgejo service account
   ansible.builtin.user:
     name: "{{ forgejo_user }}"

@@ -56,10 +56,26 @@ storage:
   local:
     path: /data/db.sqlite3
 
+{% if smtp_host | length > 0 %}
+# The password comes from AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE. submissions://
+# is TLS from the first byte (465), submission:// is STARTTLS (587).
+notifier:
+  disable_startup_check: {{ (not (authelia_smtp_startup_check | bool)) | lower }}
+  smtp:
+    address: '{{ 'submissions' if smtp_port | int == 465 else 'submission' }}://{{ smtp_host }}:{{ smtp_port }}'
+    username: '{{ smtp_username }}'
+    sender: '{{ smtp_sender }}'
+    identifier: '{{ authelia_domain }}'
+    subject: '[Authelia] {title}'
+    tls:
+      server_name: '{{ smtp_host }}'
+      minimum_version: 'TLS1.2'
+{% else %}
 notifier:
   disable_startup_check: false
   filesystem:
     filename: /data/notification.txt
+{% endif %}
 {% if authelia_oidc_clients | length > 0 %}
 
 # Authelia as an OpenID Connect provider. This is how an application that is not
