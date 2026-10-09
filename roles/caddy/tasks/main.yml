@@ -68,3 +68,10 @@
     name: caddy
     state: started
     enabled: true
+
+# Reload now rather than at the end of the play: the roles after this one need
+# the new sites — oauth2-proxy fetches Keycloak's discovery document through
+# auth.alexandre-gerault.fr — and a play that fails further on would otherwise
+# never reload at all.
+- name: Apply the new sites now
+  ansible.builtin.meta: flush_handlers
