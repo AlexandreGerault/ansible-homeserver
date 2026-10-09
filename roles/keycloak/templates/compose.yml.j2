@@ -71,11 +71,10 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       KC_BOOTSTRAP_ADMIN_USERNAME: {{ keycloak_admin_user }}
-      # The JVM sizes its heap from the container's limit, not from the host's
-      # RAM: without both, the first start pushed the whole server into swap.
-      JAVA_OPTS_KC_HEAP: -XX:MaxRAMPercentage={{ keycloak_heap_percentage }} -XX:MaxHeapFreeRatio=30
-    # memswap_limit equal to mem_limit: past the limit the kernel kills Keycloak
-    # alone instead of letting it swap the rest of the server out.
+    # The image sizes the JVM heap as a share of the memory it sees, which is
+    # the host's 8 GB without a limit: the first start pushed the whole server
+    # into swap. memswap_limit equal to mem_limit: past the limit the kernel
+    # kills Keycloak alone instead of letting it swap the rest of the server out.
     mem_limit: {{ keycloak_mem_limit }}
     memswap_limit: {{ keycloak_mem_limit }}
     secrets:
