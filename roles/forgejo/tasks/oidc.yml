@@ -1,5 +1,5 @@
 ---
-# Authelia is registered as an OAuth2 authentication source of provider type
+# Keycloak is registered as an OAuth2 authentication source of provider type
 # openidConnect. There is no file to template for this: Forgejo keeps its
 # authentication sources in the database, and the only supported way in is the
 # admin CLI — so the role reads back what is already there and adds the source
@@ -22,17 +22,24 @@
   register: forgejo_auth_list
 
 # `--vertical-bars` is what makes this parseable, but not on its own: the
-# columns are still tab-padded, so a line reads `1\t|authelia\t|OAuth2\t|true`.
-# The whitespace goes before matching — a pattern that expects `1|authelia|`
+# columns are still tab-padded, so a line reads `1\t|keycloak\t|OAuth2\t|true`.
+# The whitespace goes before matching — a pattern that expects `1|keycloak|`
 # finds nothing, and add-oauth then runs again on every play and fails on the
 # name that already exists.
-- name: Locate the authelia authentication source
+#
+# One backslash before each pipe, not two: in a folded scalar YAML leaves `\\|`
+# alone and so does the templating, and the regex `\\|` is "a backslash, or
+# anything" — which matched the header line and returned `ID` for any name.
+- name: Locate the keycloak authentication source
   ansible.builtin.set_fact:
     forgejo_oidc_source_id: >-
-      {{ ((forgejo_auth_list.stdout_lines
-            | map('regex_replace', '\\s+', '')
-            | select('match', '^[0-9]+\\|' ~ forgejo_oidc_source_name ~ '\\|')
-            | list) + [''])[0].split('|')[0] }}
+      {{ ((forgejo_auth_lines | select('match', '^[0-9]+\|' ~ forgejo_oidc_source_name ~ '\|')
+           | list) + [''])[0].split('|')[0] }}
+    forgejo_oidc_legacy_source_id: >-
+      {{ ((forgejo_auth_lines | select('match', '^[0-9]+\|' ~ forgejo_oidc_legacy_source_name ~ '\|')
+           | list) + [''])[0].split('|')[0] }}
+  vars:
+    forgejo_auth_lines: "{{ forgejo_auth_list.stdout_lines | map('regex_replace', '\\s+', '') | list }}"
 
 - name: Build the authentication source arguments
   ansible.builtin.set_fact:
@@ -41,8 +48,8 @@
           '--provider=openidConnect',
           '--key=' ~ forgejo_oidc_client_id,
           '--secret=' ~ vault_forgejo_oidc_client_secret,
-          '--auto-discover-url=https://' ~ authelia_domain
-            ~ '/.well-known/openid-configuration',
+          '--auto-discover-url=https://' ~ keycloak_domain ~ '/realms/'
+            ~ keycloak_realm ~ '/.well-known/openid-configuration',
           '--scopes=' ~ forgejo_oidc_scopes,
           '--group-claim-name=' ~ forgejo_oidc_group_claim,
           '--admin-group=' ~ forgejo_oidc_admin_group]
@@ -51,25 +58,34 @@
          + (['--skip-local-2fa'] if forgejo_oidc_skip_local_2fa | bool else []) }}
   no_log: "{{ forgejo_no_log }}"
 
-- name: Register authelia as an authentication source
+- name: Register keycloak as an authentication source
   ansible.builtin.command:
     argv: >-
       {{ ['docker', 'exec', '--user', 'git', 'forgejo',
           'forgejo', 'admin', 'auth', 'add-oauth'] + forgejo_oidc_args }}
-  when: forgejo_oidc_source_id | length == 0
+  when:
+    - forgejo_oidc_source_id | length == 0
+    - forgejo_oidc_legacy_source_id | length == 0
   no_log: "{{ forgejo_no_log }}"
   changed_when: true
 
+# The Authelia source becomes the Keycloak one: --name renames it, the rest
+# points it at the new provider. Its id does not change, so the accounts linked
+# through it — matched by subject, which the keycloak role carried over — stay
+# linked. Happens on its own, once: the next run finds the source under its new
+# name.
+#
 # The CLI offers no way to read a source back, so there is nothing to compare
 # against and nothing to report as changed. See forgejo_oidc_update.
-- name: Update the authelia authentication source
+- name: Update the keycloak authentication source
   ansible.builtin.command:
     argv: >-
       {{ ['docker', 'exec', '--user', 'git', 'forgejo',
           'forgejo', 'admin', 'auth', 'update-oauth',
-          '--id', forgejo_oidc_source_id] + forgejo_oidc_args }}
-  when:
-    - forgejo_oidc_source_id | length > 0
-    - forgejo_oidc_update | bool
+          '--id', forgejo_oidc_source_id or forgejo_oidc_legacy_source_id]
+         + forgejo_oidc_args }}
+  when: >-
+    (forgejo_oidc_source_id | length == 0 and forgejo_oidc_legacy_source_id | length > 0)
+    or (forgejo_oidc_source_id | length > 0 and forgejo_oidc_update | bool)
   no_log: "{{ forgejo_no_log }}"
   changed_when: true

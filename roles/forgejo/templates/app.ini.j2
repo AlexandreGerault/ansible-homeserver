@@ -5,7 +5,7 @@
 ; LFS JWT secret are all spelled out: leave one empty and the container writes
 ; its own on first boot, the next playbook run overwrites it, and everything
 ; that was encrypted with it — stored TOTP secrets, mirror credentials — stops
-; decrypting. Unlike Authelia's configuration.yml, this file therefore holds
+; decrypting. Unlike most configuration files here, this one therefore holds
 ; secrets; it is mode 0640 and owned by the service account for that reason.
 
 APP_NAME = {{ forgejo_app_name }}
@@ -110,14 +110,14 @@ REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.0/8,{{ docker_address_pool }}
 [service]
 ; These two are not the same knob and only work as a pair: DISABLE_REGISTRATION
 ; would block the OIDC sign-up too, so registration stays open and is then
-; narrowed to third-party sources only. Result: an Authelia account is the only
+; narrowed to third-party sources only. Result: a Keycloak account is the only
 ; way an account comes into being.
 DISABLE_REGISTRATION = false
 ALLOW_ONLY_EXTERNAL_REGISTRATION = true
 ENABLE_INTERNAL_SIGNIN = {{ forgejo_enable_internal_signin | bool | lower }}
 ENABLE_BASIC_AUTHENTICATION = {{ forgejo_enable_basic_authentication | bool | lower }}
 REQUIRE_SIGNIN_VIEW = {{ forgejo_require_signin_view | bool | lower }}
-; Stays off with a mailer too: accounts come from Authelia, which already owns
+; Stays off with a mailer too: accounts come from Keycloak, which already owns
 ; the address, and a confirmation step would only stand between a first login
 ; and the account it creates.
 REGISTER_EMAIL_CONFIRM = false
@@ -127,13 +127,13 @@ DEFAULT_ALLOW_CREATE_ORGANIZATION = true
 NO_REPLY_ADDRESS = noreply.{{ forgejo_domain }}
 
 [oauth2_client]
-; First login through Authelia creates the account instead of 404-ing on it.
+; First login through Keycloak creates the account instead of 404-ing on it.
 ENABLE_AUTO_REGISTRATION = true
-; From the preferred_username claim, which Authelia fills with the account name
-; in vault_authelia_users — not the email, and not a numeric subject.
+; From the preferred_username claim, which Keycloak fills with the account's
+; username — not the email, and not the subject UUID.
 USERNAME = nickname
 ; Link to an existing local account when the email matches, rather than
-; refusing the login. Safe here: Authelia is the only source of those emails.
+; refusing the login. Safe here: Keycloak is the only source of those emails.
 ACCOUNT_LINKING = auto
 UPDATE_AVATAR = false
 

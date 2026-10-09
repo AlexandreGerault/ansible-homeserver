@@ -48,7 +48,7 @@
 # It sits on the shared media network rather than the default bridge so
 # Jellyseerr and the Homepage widget can call http://jellyfin:8096 directly.
 # Going round through Caddy would work for Jellyfin, but not for anything behind
-# Authelia, so the whole stack uses container names consistently.
+# the SSO, so the whole stack uses container names consistently.
 - name: Run the Jellyfin container
   community.docker.docker_container:
     name: jellyfin

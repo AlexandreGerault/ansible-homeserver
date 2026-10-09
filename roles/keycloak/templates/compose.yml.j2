@@ -1,0 +1,112 @@
+# {{ ansible_managed }}
+#
+# Keycloak, its database, and oauth2-proxy — the forward_auth endpoint Caddy
+# asks about every request to a `protect: true` vhost. Only Keycloak's HTTP port
+# and oauth2-proxy's are published, both on the loopback, both behind Caddy.
+name: keycloak
+
+secrets:
+  postgres_password:
+    file: {{ keycloak_stack_dir }}/secrets/postgres_password
+  keycloak_db_password:
+    file: {{ keycloak_stack_dir }}/secrets/keycloak_db_password
+  keycloak_admin_password:
+    file: {{ keycloak_stack_dir }}/secrets/keycloak_admin_password
+  oauth2_proxy_client_secret:
+    file: {{ keycloak_stack_dir }}/secrets/oauth2_proxy_client_secret
+  oauth2_proxy_cookie_secret:
+    file: {{ keycloak_stack_dir }}/secrets/oauth2_proxy_cookie_secret
+
+services:
+  postgres:
+    image: {{ keycloak_postgres_image }}
+    container_name: keycloak_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums
+    secrets:
+      - postgres_password
+    volumes:
+      - {{ keycloak_data_dir }}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD, pg_isready, -U, keycloak, -d, keycloak]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: {{ keycloak_image }}
+    container_name: keycloak
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Keycloak reads its options from the environment and has no *_FILE form, so
+    # the two secrets are read from /run/secrets by the shell that starts it.
+    # They end up in the process environment, not in `docker inspect`.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >-
+        export KC_DB_PASSWORD="$$(< /run/secrets/keycloak_db_password)"
+        KC_BOOTSTRAP_ADMIN_PASSWORD="$$(< /run/secrets/keycloak_admin_password)"
+        && exec /opt/keycloak/bin/kc.sh start
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      # Every URL Keycloak builds — the issuer in the tokens above all — uses this
+      # name, whatever Host header the request came with. The role's own admin
+      # calls go to the loopback port and still get tokens the public clients
+      # accept.
+      KC_HOSTNAME: https://{{ keycloak_domain }}
+      # Caddy terminates TLS and talks plain HTTP to the published port.
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: {{ keycloak_admin_user }}
+    secrets:
+      - keycloak_db_password
+      - keycloak_admin_password
+    ports:
+      - {{ docker_publish_address }}:{{ keycloak_port }}:8080
+    # The image has neither curl nor wget. The health endpoints are on the
+    # management port, 9000, which is not published.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000
+          && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3
+          && grep -q 'HTTP/1.0 200' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  oauth2-proxy:
+    image: {{ oauth2_proxy_image }}
+    container_name: oauth2-proxy
+    restart: unless-stopped
+    # It fetches the realm's discovery document at startup and exits when that
+    # fails, so it waits for Keycloak — and the role only starts it once the
+    # realm exists.
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    command: [--config=/etc/oauth2-proxy.cfg]
+    secrets:
+      - oauth2_proxy_client_secret
+      - oauth2_proxy_cookie_secret
+    volumes:
+      - {{ keycloak_stack_dir }}/oauth2-proxy.cfg:/etc/oauth2-proxy.cfg:ro
+    # No healthcheck: the image is distroless, with neither a shell nor an HTTP
+    # client to ask /ping with.
+    ports:
+      - {{ docker_publish_address }}:{{ oauth2_proxy_port }}:4180

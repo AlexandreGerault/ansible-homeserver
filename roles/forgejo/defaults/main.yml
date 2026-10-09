@@ -53,15 +53,15 @@ forgejo_published_ports: >-
 # =============================================================================
 # Who gets in
 # =============================================================================
-# Authelia is the only front door: the password form is gone from the web UI and
-# accounts are created on first OIDC login. Break glass when Authelia itself is
+# Keycloak is the only front door: the password form is gone from the web UI and
+# accounts are created on first OIDC login. Break glass when Keycloak itself is
 # broken — flip this to true for one run, sign in with a local account made by
 # `forgejo admin user create`, fix, flip it back.
 forgejo_enable_internal_signin: false
 
 # HTTP basic authentication stays on. It is how `git clone https://…`, the API
 # and the container registry authenticate, with a personal access token in place
-# of the password — requests Authelia never sees, which is exactly why the vhost
+# of the password — requests the SSO never sees, which is exactly why the vhost
 # is not behind forward_auth. Turning it off buys nothing and breaks all three.
 forgejo_enable_basic_authentication: true
 
@@ -78,7 +78,7 @@ forgejo_repo_indexer: true
 forgejo_actions_enabled: false
 
 # Forgejo's own OAuth2 *provider* — the one third-party apps would log in
-# against. Authelia is the identity provider here, so it stays off. Its JWT
+# against. Keycloak is the identity provider here, so it stays off. Its JWT
 # secret is in the vault all the same: Forgejo generates one and writes it into
 # app.ini even when the provider is disabled.
 forgejo_oauth2_provider_enabled: false
@@ -95,32 +95,35 @@ smtp_sender: ""
 forgejo_mailer_enabled: "{{ smtp_host | length > 0 }}"
 
 # =============================================================================
-# The Authelia authentication source
+# The Keycloak authentication source
 # =============================================================================
 forgejo_oidc_configure: true
-forgejo_oidc_source_name: authelia
+forgejo_oidc_source_name: keycloak
 forgejo_oidc_client_id: forgejo
 forgejo_oidc_scopes: "openid email profile groups"
 
-# Group-driven administration: whoever carries this group in the Authelia claim
-# is an admin in Forgejo, and loses it when the group is removed from the vault.
-# It has to match a group in vault_authelia_users, and the `groups` scope has to
-# be granted to the client, or the claim never arrives and everyone lands as a
-# plain user.
+# The name the source had while Authelia was the provider. Found under that
+# name, the source is updated in place to point at Keycloak and renamed: same
+# id in the database, so every account linked to it stays linked.
+forgejo_oidc_legacy_source_name: authelia
+
+# Group-driven administration: whoever carries this group in the Keycloak claim
+# is an admin in Forgejo, and loses it when they leave the group. The keycloak
+# role creates the group and gives the client the `groups` scope; without it the
+# claim never arrives and everyone lands as a plain user.
 forgejo_oidc_group_claim: groups
 forgejo_oidc_admin_group: admins
 forgejo_oidc_restricted_group: ""
 
-# Leave false: Forgejo's own TOTP still applies on top of Authelia for anyone
-# who enrolled one. Setting it true hands the whole second factor to Authelia,
-# which is only a good trade once that client's authorization_policy is
-# two_factor.
+# Leave false: Forgejo's own TOTP still applies on top of Keycloak for anyone
+# who enrolled one. Setting it true hands the whole second factor to Keycloak,
+# which is only a good trade once Keycloak requires one.
 forgejo_oidc_skip_local_2fa: false
 
 # add-oauth runs once, when no source by that name exists. The CLI cannot tell
 # us whether the stored source still matches what is configured here, so the
 # update is deliberate: flip this to true for a single run after changing the
-# client secret, the Authelia domain or the group mapping.
+# client secret, the Keycloak domain or the group mapping.
 forgejo_oidc_update: false
 
 # The add-oauth and update-oauth command lines carry the client secret.
@@ -134,7 +137,8 @@ forgejo_wait_retries: 40
 forgejo_wait_delay: 5
 
 # Inherited from group_vars; defaulted here so the role still renders on its own.
-authelia_domain: authelia.alexandre-gerault.fr
+keycloak_domain: auth.alexandre-gerault.fr
+keycloak_realm: homeserver
 docker_publish_address: "127.0.0.1"
 common_timezone: Etc/UTC
 # Caddy reaches the container from the docker bridge, not from 127.0.0.1, so the

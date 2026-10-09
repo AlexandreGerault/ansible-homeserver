@@ -4,5 +4,6 @@ caddy_config_dir: /etc/caddy
 caddy_sites_dir: /etc/caddy/caddyfiles.d
 caddy_log_dir: /var/log/caddy
 caddy_log_file: /var/log/caddy/access.log
-# Where Caddy sends forward_auth subrequests for sites with `protect: true`.
-caddy_authelia_upstream: "127.0.0.1:8098"
+# Where Caddy sends forward_auth subrequests for sites with `protect: true`:
+# oauth2-proxy, from the keycloak role.
+caddy_forward_auth_upstream: "127.0.0.1:4180"

@@ -27,8 +27,8 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `qbittorrent` | The torrent client and the gluetun container that holds its VPN tunnel |
 | `arr_stack` | Prowlarr, Sonarr, Radarr, Bazarr and Jellyseerr, plus the wiring between them |
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
-| `authelia` | The SSO portal: configuration, users database, secrets, container |
-| `forgejo` | The git forge, its `app.ini` and the Authelia authentication source |
+| `keycloak` | The SSO: Keycloak, its Postgres, the realm and its clients, and oauth2-proxy for `forward_auth` |
+| `forgejo` | The git forge, its `app.ini` and the Keycloak authentication source |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
@@ -43,7 +43,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `scholarsome.alexandre-gerault.fr` | scholarsome, 4444 |
 | `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 — **behind the SSO** |
 | `arbitrageffv.alexandre-gerault.fr` | arbitrage_ffv, 8000 |
-| `authelia.alexandre-gerault.fr` | authelia, 8098 |
+| `auth.alexandre-gerault.fr` | keycloak, 8180 — and oauth2-proxy, 4180, under `/oauth2/` |
 | `torrent.alexandre-gerault.fr` | qbittorrent, 8099 — **behind the SSO** |
 | `prowlarr.alexandre-gerault.fr` | prowlarr, 9696 — **behind the SSO** |
 | `sonarr.alexandre-gerault.fr` | sonarr, 8989 — **behind the SSO** |
@@ -70,22 +70,21 @@ The vault holds:
 | `vault_ssh_authorized_keys` | `ssh` — a dict of account name to list of public keys |
 | `vault_homepage_jellyfin_api_key` | `homepage` — the Jellyfin widget |
 | `vault_affine_db_password` | `compose_app` — affine's Postgres |
-| `vault_smtp_password` | `authelia`, `forgejo`, `compose_app` (affine) — the `homeserver@alexandre-gerault.fr` mailbox on the mail server |
+| `vault_smtp_password` | `keycloak`, `forgejo`, `compose_app` (affine) — the `homeserver@alexandre-gerault.fr` mailbox on the mail server |
 | `vault_scholarsome_database_password`, `vault_scholarsome_jwt_secret` | `compose_app` — scholarsome |
 | `vault_arbitrage_ffv_app_key`, `vault_arbitrage_ffv_db_password`, `vault_arbitrage_ffv_mysql_root_password` | `arbitrage_ffv` |
-| `vault_authelia_jwt_secret`, `vault_authelia_session_secret`, `vault_authelia_storage_encryption_key` | `authelia` |
-| `vault_authelia_users` | `authelia` — the file backend accounts, with argon2id hashes |
+| `vault_keycloak_admin_password` | `keycloak` — the `admin` account of the master realm, the one the role configures the realm as |
+| `vault_keycloak_db_password` | `keycloak` — Keycloak's Postgres user |
+| `vault_oauth2_proxy_client_secret` | `keycloak` — oauth2-proxy's OpenID Connect client secret |
+| `vault_oauth2_proxy_cookie_secret` | `keycloak` — the key oauth2-proxy encrypts its session cookie with, exactly 32 characters |
 | `vault_qbittorrent_openvpn_user`, `vault_qbittorrent_openvpn_password` | `qbittorrent` — the CyberGhost manual-configuration credentials, not the account login |
 | `vault_qbittorrent_openvpn_cert`, `vault_qbittorrent_openvpn_key` | `qbittorrent` — the `client.crt` and `client.key` of the same manual configuration, as PEM block scalars |
 | `vault_qbittorrent_password_pbkdf2` | `qbittorrent` — the WebUI password, PBKDF2 |
 | `vault_qbittorrent_webui_password` | `arr_stack` and `homepage` — the same WebUI password in clear, which is what Sonarr and Radarr log in with |
 | `vault_prowlarr_api_key`, `vault_sonarr_api_key`, `vault_radarr_api_key`, `vault_bazarr_api_key` | `arr_stack` and `homepage` — 32 hex characters each |
-| `vault_authelia_oidc_hmac_secret`, `vault_authelia_oidc_jwk` | `authelia` — the OpenID Connect provider: token HMAC secret and the RSA signing key, as a PEM block scalar |
 | `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
-| `vault_forgejo_oidc_client_secret` | `forgejo` — the OpenID Connect client secret, in clear |
-| `vault_forgejo_oidc_client_secret_digest` | `authelia` — the pbkdf2 digest of that same secret |
-| `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
-| `vault_affine_oidc_client_secret_digest`, `vault_penpot_oidc_client_secret_digest` | `authelia` — their pbkdf2 digests |
+| `vault_forgejo_oidc_client_secret` | `forgejo` and `keycloak` — the OpenID Connect client secret, in clear |
+| `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` and `keycloak` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
 
 The four *arr keys are yours to pick rather than the applications': generating
 them here is what lets the playbook wire Prowlarr to Sonarr and Radarr, and lets
@@ -97,7 +96,7 @@ python3 -c 'import secrets; print(secrets.token_hex(16))'
 
 ## Putting a site behind the SSO
 
-Authelia protects nothing by default. Add `protect: true` to an entry of
+Nothing is protected by default. Add `protect: true` to an entry of
 `caddy_sites` and re-run the `caddy` tag:
 
 ```yaml
@@ -108,13 +107,86 @@ Authelia protects nothing by default. Add `protect: true` to an entry of
     protect: true
 ```
 
-Accounts live in `vault_authelia_users`. To add one, generate the hash with the
-image itself and put it in the vault:
+Keycloak has no forward-auth endpoint, so Caddy's `forward_auth` asks
+**oauth2-proxy** instead — one more Keycloak client, in the same compose
+project. Its answer is 202 for a valid session cookie, and otherwise a redirect
+straight to the Keycloak login page. After the login, Keycloak sends the browser
+to `https://auth.alexandre-gerault.fr/oauth2/callback` (Caddy routes `/oauth2/`
+on that vhost to oauth2-proxy), and from there back to the page it asked for.
+The cookie is set on `.alexandre-gerault.fr`, so one login covers every
+protected vhost.
 
-```bash
-docker run --rm ghcr.io/authelia/authelia:4.38 \
-  authelia crypto hash generate argon2 --password 'the-password'
-```
+Two details of the vhost template are load-bearing:
+
+- **`X-Auth-Request-Redirect`** carries the original URL. `forward_auth` keeps
+  the original `Host` header, and oauth2-proxy then ignores `X-Forwarded-Host`
+  and sends the browser back to the right path on Keycloak's vhost.
+- **`X-Auth-Request-Groups` is not copied** to the upstream: Caddy 2.6 sends the
+  literal placeholder when the header is missing, which it is for an account in
+  no group. Nothing reads these headers today anyway.
+
+To sign out of every protected vhost at once:
+`https://auth.alexandre-gerault.fr/oauth2/sign_out`. That drops oauth2-proxy's
+cookie, not the Keycloak session — the next visit logs straight back in, unless
+the Keycloak session is ended too (account console → Sign out).
+
+## Accounts
+
+Accounts live in **Keycloak's database**, not in the vault, and are managed in
+the console: `https://auth.alexandre-gerault.fr/admin/homeserver/console/`,
+signed in as `admin` with `vault_keycloak_admin_password` on the *master*
+realm's login page (`/admin/`). Users → Add user, then Credentials → Set
+password; tick *Email verified*, untick *Temporary* unless you want them to
+choose their own. Membership of `admins` is what makes someone a Forgejo
+administrator.
+
+Users change their own password, and enrol an authenticator app, at
+`https://auth.alexandre-gerault.fr/realms/homeserver/account/`. A
+"forgot password" link sits on the login page, through the shared mail account.
+
+The realm itself — sessions, brute force protection, the mail server, the user
+profile, the groups, the clients — is code, in `roles/keycloak/tasks/configure.yml`,
+and goes through the admin API on the loopback port on every run. Sessions last
+what Authelia's did: 15 minutes idle, an hour in all, a month with "remember
+me". Three failed logins within two minutes lock an account for five minutes.
+
+First and last name are optional in the realm's user profile. Authelia only ever
+had a display name, which does not always split in two; left required, Keycloak
+would stop such an account at its next login with an "update your profile" form.
+
+## Migrating from Authelia
+
+The `keycloak` role took over from Authelia on its first run, by itself:
+
+1. It read `/etc/authelia/users_database.yml` **on the server** — what Authelia
+   authenticated against, not `vault_authelia_users`.
+2. It asked the running Authelia for the OpenID Connect subject it had handed
+   each account (`authelia storage user identifiers export`).
+3. It imported every account into the realm with its **password hash as is**:
+   Authelia's argon2id hashes are rewritten as Keycloak argon2 credentials by
+   `roles/keycloak/filter_plugins/authelia.py`, nothing is re-hashed, so every
+   password keeps working without anyone knowing it. Keycloak re-hashes each
+   one with its own parameters at the first successful login. Groups come along;
+   the display name is split into first and last name at the first space.
+4. Each account's Keycloak id **is its old Authelia subject**, so Forgejo, AFFiNE
+   and Penpot — which recognise a returning user by `sub` — stay linked to the
+   same local accounts. An account that never logged in to any of them had no
+   subject; it gets a new id, and the application links it by email.
+5. It wrote `/etc/keycloak/authelia-migrated`, with what it imported, and removed
+   the `authelia` container.
+
+The import runs once: with the marker in place, an account deleted in Keycloak
+does not come back on the next run. Delete the marker to import again —
+accounts that already exist are skipped, never overwritten.
+
+What did **not** come over: TOTP and WebAuthn devices. The role does not carry
+them, on purpose: nobody was ever asked for them (every rule was `one_factor`),
+whereas Keycloak asks for a second factor as soon as an account has one —
+importing them would have turned on 2FA for whoever once enrolled a device.
+Whoever wants one enrols again in the account console.
+`/etc/authelia` and `/var/lib/authelia` stay on disk until
+`-e authelia_remove_data=true`; the `vault_authelia_*` and `…_digest` keys in
+the vault are no longer read by anything.
 
 ## The git forge
 
@@ -123,20 +195,25 @@ that carries no `protect: true`. That is deliberate, and it is worth
 understanding before "fixing" it:
 
 `forward_auth` answers any request without a session cookie with a redirect to
-the login portal. A browser follows it; `git clone`, `git push`, the API, the
+the login page. A browser follows it; `git clone`, `git push`, the API, the
 container registry and every webhook do not — they get a 302 and an HTML page
 where they expected a git protocol, a JSON body or a token challenge. So
-Authelia guards Forgejo one level deeper instead: it is Forgejo's **OpenID
-Connect provider**, which covers the browser path (the login page is the
-Authelia portal), while tokens and SSH keys cover everything else.
+Keycloak guards Forgejo one level deeper instead: it is Forgejo's **OpenID
+Connect provider**, which covers the browser path (the login page is
+Keycloak's), while tokens and SSH keys cover everything else.
 
 Consequences worth remembering:
 
 - **The password form is gone** (`ENABLE_INTERNAL_SIGNIN = false`) and accounts
-  are created on first login through Authelia, not by registering. An account in
-  `vault_authelia_users` is the only way in.
+  are created on first login through Keycloak, not by registering. A Keycloak
+  account is the only way in.
 - **The `admins` group grants administration.** It comes over as the `groups`
-  claim; drop it from the vault and the next login is a plain user.
+  claim; take someone out of the group in Keycloak and their next login is a
+  plain user.
+- **The authentication source is called `keycloak`**, and its callback is
+  `/user/oauth2/keycloak/callback`. It used to be `authelia`: the role renamed
+  it in place rather than adding a second one, so its id — and every account
+  linked through it — stayed the same.
 - **git over SSH is on host port 22**, which is free because sshd listens on
   `ssh_port`. What answers there is Forgejo's builtin SSH server — key auth
   only, git commands only, no shell — and it is the only container port
@@ -147,7 +224,9 @@ Consequences worth remembering:
 
 ### The secrets it needs
 
-Five for Forgejo, two for Authelia's provider, one pair shared between them.
+Five, all Forgejo's own. The client secret is also what the `keycloak` role
+registers for the `forgejo` client: Keycloak stores a client secret as it is
+given, so there is no digest to keep next to it.
 
 ```bash
 # Forgejo, one per vault entry. JWT_SECRET twice: the LFS one and the OAuth2
@@ -158,42 +237,37 @@ docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret INTERNAL
 docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret JWT_SECRET
 docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret JWT_SECRET
 
-# Authelia's OpenID Connect signing key — private.pem goes in the vault as a
-# block scalar, public.pem is not needed anywhere
-docker run --rm -v "$PWD:/keys" ghcr.io/authelia/authelia:4.39 \
-  authelia crypto pair rsa generate --bits 2048 --directory /keys
-
-# The HMAC secret. alphanumeric on purpose: it lands in a YAML file and in an
-# HTTP header, and this way neither has to quote or encode anything
-docker run --rm ghcr.io/authelia/authelia:4.39 \
-  authelia crypto rand --length 64 --charset alphanumeric
-
-# The client secret and its digest, in one shot: "Random Password" goes to
-# vault_forgejo_oidc_client_secret, "Digest" to …_client_secret_digest
-docker run --rm ghcr.io/authelia/authelia:4.39 \
-  authelia crypto hash generate pbkdf2 --variant sha512 --random \
-    --random.length 72 --random.charset rfc3986
+# The client secret
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 ```
 
 Changing the client secret afterwards means telling Forgejo about it: the
 authentication source lives in its database, not in a file, so set
 `forgejo_oidc_update: true` for one run.
 
-## Signing in through Authelia
+## Signing in through Keycloak
 
 Besides the `protect: true` vhosts, three applications delegate their login to
-Authelia over OpenID Connect, each as a client in `authelia_oidc_clients`:
+Keycloak over OpenID Connect, each as a client in `keycloak_oidc_clients`:
 
 - **Forgejo** — see "The git forge".
 - **AFFiNE** reads its provider from `config.json`, templated by `compose_app`
-  into the directory its container mounts as `~/.affine/config`. The first
-  Authelia login of an existing account is matched by email and linked to it.
-  Password login is kept: two of its accounts have addresses no Authelia user
-  carries, and those people would otherwise be locked out.
+  into the directory its container mounts as `~/.affine/config`. A returning
+  user is matched by subject, or by email the first time. Password login is
+  kept: two of its accounts have addresses no Keycloak user carries, and those
+  people would otherwise be locked out.
 - **Penpot** has neither a password form nor a sign-up page any more
-  (`disable-login-with-password`, `disable-registration`); a first Authelia
-  login creates the profile (`enable-oidc-registration`). It had no account when
-  this was switched on.
+  (`disable-login-with-password`, `disable-registration`); a first Keycloak
+  login creates the profile (`enable-oidc-registration`). Its
+  `PENPOT_OIDC_BASE_URI` ends with a slash on purpose: Penpot resolves
+  `.well-known/openid-configuration` against it as a relative reference, and
+  without the slash the realm name would be replaced instead of extended.
+
+The issuer is `https://auth.alexandre-gerault.fr/realms/homeserver` for all
+three. Every client gets the `basic` scope, which is what carries `sub` since
+Keycloak 25, and Forgejo and oauth2-proxy also get `groups` — a scope the role
+creates, since Keycloak has none, with bare group names (`admins`, not
+`/admins`).
 
 **Uptime Kuma** sits behind forward_auth with its own authentication turned off —
 the `disableAuth` setting, written once into its database on 2026-09-15. That
@@ -204,23 +278,22 @@ same trade-off as the *arr `External` authentication.
 
 ## Outgoing mail
 
-Authelia, Forgejo and AFFiNE send mail through one account,
+Keycloak, Forgejo and AFFiNE send mail through one account,
 `homeserver@alexandre-gerault.fr` on `mail.alexandre-gerault.fr`, port 465 (TLS
 from the first byte), as `Homeserver <noreply@alexandre-gerault.fr>`. The
 settings are the `smtp_*` variables in `group_vars/all/main.yml`, the password
 is `vault_smtp_password`.
 
-- **Authelia** sends identity verification (TOTP enrolment, password reset).
-  Its startup check is off (`authelia_smtp_startup_check: false`): the portal
-  starts even when the mail server is down, and only the mails sent meanwhile
-  fail, logged as errors. The flip side is that a wrong SMTP password surfaces
-  at the first mail rather than at deploy time.
+- **Keycloak** sends password resets. The mail server is part of the realm,
+  written by the role. "Test connection" in the console writes to the signed-in
+  administrator's address, which `admin` does not have: "forgot password" on
+  the login page is the simpler test.
 - **Forgejo** sends notifications for issues, pull requests and mentions.
 - **AFFiNE** sends invitations and sign-in links, built from
   `affine_external_url`.
 
-Setting `smtp_host` to an empty string puts all three back on no mail, Authelia
-on its file notifier.
+Setting `smtp_host` to an empty string puts all three back on no mail, and takes
+the "forgot password" link off Keycloak's login page.
 
 ## The torrent client and its VPN
 
@@ -240,7 +313,7 @@ country is a variable rather than a downloaded `.ovpn`
 
 The WebUI is published by the *gluetun* container (`127.0.0.1:8099`), because
 that is where the network stack lives, and it is proxied by Caddy with
-`protect: true`, so it sits behind Authelia.
+`protect: true`, so it sits behind the SSO.
 
 Downloads land in `/var/jellyfin/media/downloads/{incomplete,complete}`, written
 by a `qbittorrent` service account in the `jellyfin` group with `UMASK=002`, on
@@ -402,7 +475,7 @@ project — a network owned by one project vanishes when that project is torn
 down. Jellyfin, Homepage, the five *arr containers and gluetun all join it, and
 address each other by container name.
 
-They have to. Every vhost above is behind Authelia, so an API call sent to the
+They have to. Every vhost above is behind the SSO, so an API call sent to the
 public address gets a login redirect, not JSON. `http://sonarr:8989` gets JSON.
 
 gluetun is the awkward one: qBittorrent lives in its network namespace, so the
@@ -414,13 +487,13 @@ drops the replies to Sonarr along with everything else.
 
 The three Servarr applications are seeded with `AuthenticationMethod=External`:
 they do no login of their own and trust what is in front of them, which is Caddy
-with Authelia. Their ports are published on the loopback only, so the practical
+with the SSO. Their ports are published on the loopback only, so the practical
 consequence is that anyone with a shell on the host can reach the API without
 authenticating — which is already true of the docker socket.
 
-Jellyseerr is deliberately **not** behind Authelia. It signs people in against
+Jellyseerr is deliberately **not** behind the SSO. It signs people in against
 Jellyfin, so the people you have already given a Jellyfin account can request a
-film without you also creating an Authelia account for each of them.
+film without you also creating a Keycloak account for each of them.
 
 ### What Ansible wires, and what it does not
 
@@ -523,8 +596,8 @@ Still open, because they change the running server rather than describe it:
    survive a reboot — and coolify is installed with no container running. Their
    leftovers are the `excalidraw` vhost, the `coolify` docker network and
    `/data/coolify`.
-5. **The legacy authelia stack** under `~/apps/authelia` is superseded by the
-   `authelia` role and can be deleted once the role has run; its secrets are in
-   the vault.
+5. **The legacy authelia stack** under `~/apps/authelia` predates even the
+   `authelia` role, which Keycloak has since replaced; it can be deleted, along
+   with `/etc/authelia` and `/var/lib/authelia` once the migration is checked.
 6. **No backups.** Nothing on this machine is backed up, which is what turned a
    disk format into the loss of this repository.

@@ -3,7 +3,7 @@
 # One compose project for the whole stack. Everything joins the shared media
 # network as its default, so the containers address each other by name —
 # http://sonarr:8989 rather than a round trip through Caddy, which would land on
-# Authelia and get a redirect instead of JSON.
+# the SSO and get a redirect instead of JSON.
 name: arr
 
 networks:

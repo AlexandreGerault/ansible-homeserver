@@ -48,7 +48,7 @@
 
 # On the media network rather than the default bridge: the widgets are fetched
 # by the container itself, so they call http://sonarr:8989 directly. Going out
-# through the public vhost would hit Authelia and get a login page back.
+# through the public vhost would hit the SSO and get a login page back.
 - name: Run the homepage container
   community.docker.docker_container:
     name: homepage

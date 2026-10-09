@@ -10,10 +10,29 @@
     }
 {% endif %}
 {% if site.protect | default(false) %}
-    forward_auth {{ caddy_authelia_upstream }} {
-        uri /api/authz/forward-auth
-        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    # oauth2-proxy answers 202 for a valid session, and otherwise a redirect to
+    # Keycloak that Caddy hands back to the browser as is. The URL to come back
+    # to travels in X-Auth-Request-Redirect: forward_auth keeps the original Host
+    # header, which makes oauth2-proxy ignore X-Forwarded-Host and send the
+    # browser back to the right path on the wrong vhost — Keycloak's.
+    forward_auth {{ caddy_forward_auth_upstream }} {
+        uri /
+        header_up X-Auth-Request-Redirect {scheme}://{hostport}{uri}
+        # Not X-Auth-Request-Groups: an account in no group gets no such header,
+        # and Caddy 2.6 then sends the upstream the unreplaced placeholder.
+        copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
     }
 {% endif %}
+{% for route in site.routes | default([]) %}
+    handle {{ route.path }} {
+        reverse_proxy :{{ route.upstream_port }}
+    }
+{% endfor %}
+{% if site.routes | default([]) %}
+    handle {
+        reverse_proxy :{{ site.upstream_port }}
+    }
+{% else %}
     reverse_proxy :{{ site.upstream_port }}
+{% endif %}
 }

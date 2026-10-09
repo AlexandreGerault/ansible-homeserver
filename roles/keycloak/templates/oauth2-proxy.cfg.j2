@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+#
+# oauth2-proxy as Caddy's forward_auth endpoint for every `protect: true` vhost.
+# The two secrets are compose secrets; nothing in this file is one.
+#
+# How a request goes through:
+#  - Caddy sends a copy of it to "/" here, with the original URL in
+#    X-Auth-Request-Redirect.
+#  - With a valid session cookie, the static upstream answers 202 and Caddy
+#    proxies the real request.
+#  - Without one, this answers with a redirect straight to Keycloak (no sign-in
+#    page in between), with the original URL in the OAuth2 state. Keycloak sends
+#    the browser back to /oauth2/callback on its own vhost, where Caddy routes it
+#    here, and from there to the original URL — if it is on a whitelisted
+#    domain.
+
+provider = "keycloak-oidc"
+oidc_issuer_url = "https://{{ keycloak_domain }}/realms/{{ keycloak_realm }}"
+client_id = "oauth2-proxy"
+client_secret_file = "/run/secrets/oauth2_proxy_client_secret"
+code_challenge_method = "S256"
+scope = "openid email profile groups"
+redirect_url = "https://{{ keycloak_domain }}/oauth2/callback"
+
+http_address = "0.0.0.0:4180"
+reverse_proxy = true
+upstreams = ["static://202"]
+skip_provider_button = true
+set_xauthrequest = true
+
+# Any account in the realm gets through, the way Authelia's single one_factor
+# rule let any account through. To narrow it, allowed_groups.
+email_domains = ["*"]
+# Addresses are typed in by an administrator, never self-declared: an account
+# created in the console without ticking "Email verified" still gets in.
+insecure_oidc_allow_unverified_email = true
+
+cookie_secret_file = "/run/secrets/oauth2_proxy_cookie_secret"
+cookie_domains = [".{{ keycloak_root_domain }}"]
+whitelist_domains = [".{{ keycloak_root_domain }}"]
+cookie_secure = true
+cookie_expire = "{{ oauth2_proxy_cookie_expire }}"
+cookie_refresh = "{{ oauth2_proxy_cookie_refresh }}"
+
+# Only Caddy reaches the published port, on the loopback; from inside the
+# container it arrives from the docker bridge, somewhere in the address pool.
+trusted_proxy_ips = ["127.0.0.0/8", "{{ docker_address_pool }}"]
+
+silence_ping_logging = true

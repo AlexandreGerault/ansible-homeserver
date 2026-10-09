@@ -72,7 +72,7 @@ docker_publish_address: "127.0.0.1"
 
 # Shared network for the media stack. Jellyfin, Homepage, the *arr containers
 # and gluetun all join it, so they reach each other by container name instead of
-# through Caddy — Authelia sits in front of every vhost and would bounce an API
+# through Caddy — the SSO sits in front of every vhost and would bounce an API
 # call. The subnet is pinned because gluetun's firewall needs it spelled out
 # before it will route replies back to a neighbouring docker network.
 media_network: media
@@ -103,9 +103,15 @@ caddy_sites:
   - name: arbitrageffv
     domain: arbitrageffv.alexandre-gerault.fr
     upstream_port: 8000
-  - name: authelia
-    domain: authelia.alexandre-gerault.fr
-    upstream_port: 8098
+  # Keycloak, and oauth2-proxy's callback under /oauth2/ on the same name:
+  # Keycloak has no such path, and one name means one DNS record.
+  - name: keycloak
+    domain: auth.alexandre-gerault.fr
+    upstream_port: 8180
+    log: true
+    routes:
+      - path: /oauth2/*
+        upstream_port: 4180
   - name: excalidraw
     domain: excalidraw.alexandre-gerault.fr
     upstream_port: 5000
@@ -152,9 +158,9 @@ caddy_sites:
     log: true
     protect: true
   # Jellyseerr authenticates against Jellyfin itself, so it is deliberately not
-  # behind Authelia: the people who are allowed to request a film already have a
-  # Jellyfin account, and putting the portal behind SSO would mean creating an
-  # Authelia account for each of them as well.
+  # behind the SSO: the people who are allowed to request a film already have a
+  # Jellyfin account, and putting the portal behind SSO would mean creating a
+  # Keycloak account for each of them as well.
   - name: jellyseerr
     domain: requests.alexandre-gerault.fr
     upstream_port: 5055
@@ -162,7 +168,7 @@ caddy_sites:
   # Deliberately not `protect: true`. forward_auth answers a request without a
   # session cookie with a redirect to the login portal, which is the right thing
   # for a web interface and the wrong thing for `git clone`, for the API and for
-  # every webhook. Forgejo delegates its login page to Authelia over OpenID
+  # every webhook. Forgejo delegates its login page to Keycloak over OpenID
   # Connect instead, so the SSO still guards the browser path.
   - name: forgejo
     domain: git.alexandre-gerault.fr
@@ -170,48 +176,46 @@ caddy_sites:
     log: true
 
 # =============================================================================
-# Authelia — SSO. Add `protect: true` to a caddy_sites entry to put it behind
-# the login portal; nothing is protected until you do.
+# Keycloak — SSO. Add `protect: true` to a caddy_sites entry to put it behind
+# the login page (through oauth2-proxy); nothing is protected until you do.
+# Accounts live in Keycloak's database and are managed in its console.
 # =============================================================================
-authelia_port: 8098
-authelia_domain: authelia.alexandre-gerault.fr
-authelia_root_domain: alexandre-gerault.fr
-authelia_default_redirect: https://dashboard.homelab.alexandre-gerault.fr
-caddy_authelia_upstream: "127.0.0.1:8098"
+keycloak_domain: auth.alexandre-gerault.fr
+keycloak_root_domain: alexandre-gerault.fr
+keycloak_port: 8180
+keycloak_realm: homeserver
+oauth2_proxy_port: 4180
+caddy_forward_auth_upstream: "127.0.0.1:4180"
 
-# Applications that log in *through* Authelia instead of sitting behind
-# forward_auth. one_factor for Forgejo, to match the wildcard access rule. Now
-# that the notifier sends real mail, every user can enrol a TOTP device on their
-# own; move it to two_factor once they all have.
-authelia_oidc_clients:
+keycloak_groups:
+  - "{{ forgejo_oidc_admin_group }}"
+
+# Applications that log in *through* Keycloak instead of sitting behind
+# forward_auth. The secrets are the ones the applications already held when
+# Authelia was the provider: Keycloak stores a client secret as it is given.
+keycloak_oidc_clients:
   - id: forgejo
     name: Forgejo
-    secret_digest: "{{ vault_forgejo_oidc_client_secret_digest }}"
-    policy: one_factor
+    secret: "{{ vault_forgejo_oidc_client_secret }}"
+    groups: true
     redirect_uris:
-      - "https://git.alexandre-gerault.fr/user/oauth2/authelia/callback"
+      - "https://git.alexandre-gerault.fr/user/oauth2/keycloak/callback"
   # AFFiNE sends its secret in the form body and always uses PKCE (S256).
   - id: affine
     name: AFFiNE
-    secret_digest: "{{ vault_affine_oidc_client_secret_digest }}"
-    policy: one_factor
-    token_endpoint_auth_method: client_secret_post
-    scopes: [openid, email, profile]
+    secret: "{{ vault_affine_oidc_client_secret }}"
     redirect_uris:
       - "https://affine.alexandre-gerault.fr/oauth/callback"
-  # Penpot sends its secret in the form body and does not implement PKCE.
+  # Penpot does not implement PKCE.
   - id: penpot
     name: Penpot
-    secret_digest: "{{ vault_penpot_oidc_client_secret_digest }}"
-    policy: one_factor
-    token_endpoint_auth_method: client_secret_post
-    require_pkce: false
-    scopes: [openid, email, profile]
+    secret: "{{ vault_penpot_oidc_client_secret }}"
+    pkce: false
     redirect_uris:
       - "https://penpot.alexandre-gerault.fr/api/auth/oauth/oidc/callback"
 
 # =============================================================================
-# Outgoing mail — one account on the mail server, shared by Authelia, Forgejo
+# Outgoing mail — one account on the mail server, shared by Keycloak, Forgejo
 # and AFFiNE. Its password is vault_smtp_password. Port 465 is TLS from the
 # first byte (checked 2026-09-15: Let's Encrypt certificate, AUTH accepted, and
 # noreply@ accepted as a sender for this login); 587 with STARTTLS answers too.
@@ -297,8 +301,8 @@ forgejo_ssh_enabled: true
 forgejo_ssh_publish_address: "0.0.0.0"
 forgejo_ssh_port: 22
 
-# Whoever carries this Authelia group is an administrator in Forgejo. It has to
-# exist in vault_authelia_users.
+# Whoever carries this Keycloak group is an administrator in Forgejo. It is
+# created by the keycloak role; membership is managed in the Keycloak console.
 forgejo_oidc_admin_group: admins
 
 # =============================================================================

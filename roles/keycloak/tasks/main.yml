@@ -1,0 +1,142 @@
+---
+# Keycloak replaces Authelia as the identity provider. Two things Authelia did in
+# one binary are split here: Keycloak holds the accounts and speaks OpenID
+# Connect to Forgejo, AFFiNE and Penpot, and oauth2-proxy answers Caddy's
+# forward_auth for the `protect: true` vhosts, as one more Keycloak client.
+#
+# The order matters on a first run: oauth2-proxy refuses to start until the
+# realm it points at exists, so Keycloak comes up alone, the realm is
+# configured, and only then does the rest of the stack start.
+
+- name: Check the vault holds the keycloak secrets
+  ansible.builtin.assert:
+    that:
+      - vault_keycloak_admin_password | default('') | length >= 16
+      - vault_keycloak_db_password | default('') | length >= 16
+      - vault_oauth2_proxy_client_secret | default('') | length >= 32
+      - vault_oauth2_proxy_cookie_secret | default('') | length in [16, 24, 32]
+      - keycloak_oidc_clients | map(attribute='secret', default='')
+        | select | length == keycloak_oidc_clients | length
+    fail_msg: >-
+      Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_keycloak_admin_password, vault_keycloak_db_password,
+      vault_oauth2_proxy_client_secret and vault_oauth2_proxy_cookie_secret —
+      the last one exactly 16, 24 or 32 characters. Every entry of
+      keycloak_oidc_clients needs a secret too. See the README.
+    quiet: true
+
+- name: Check the vault holds the SMTP password
+  ansible.builtin.assert:
+    that:
+      - vault_smtp_password | default('') | length > 0
+    fail_msg: >-
+      smtp_host is set, so the realm's mail server needs vault_smtp_password in
+      group_vars/all/vault.yml.
+    quiet: true
+  when: smtp_host | length > 0
+
+- name: Ensure the keycloak directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ keycloak_stack_dir }}"
+      mode: "0750"
+    - path: "{{ keycloak_stack_dir }}/secrets"
+      mode: "0700"
+    - path: "{{ keycloak_data_dir }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+# The database password twice, once per reader: compose secrets keep the owner
+# and mode of the host file, and postgres and keycloak run as different uids.
+- name: Deploy the keycloak secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ keycloak_stack_dir }}/secrets/{{ item.name }}"
+    owner: "{{ item.owner }}"
+    group: root
+    mode: "0400"
+  loop:
+    - name: postgres_password
+      value: "{{ vault_keycloak_db_password }}"
+      owner: "{{ keycloak_postgres_uid }}"
+    - name: keycloak_db_password
+      value: "{{ vault_keycloak_db_password }}"
+      owner: "{{ keycloak_uid }}"
+    - name: keycloak_admin_password
+      value: "{{ vault_keycloak_admin_password }}"
+      owner: "{{ keycloak_uid }}"
+    - name: oauth2_proxy_client_secret
+      value: "{{ vault_oauth2_proxy_client_secret }}"
+      owner: "{{ oauth2_proxy_uid }}"
+    - name: oauth2_proxy_cookie_secret
+      value: "{{ vault_oauth2_proxy_cookie_secret }}"
+      owner: "{{ oauth2_proxy_uid }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  register: keycloak_secrets_state
+
+- name: Deploy the oauth2-proxy configuration
+  ansible.builtin.template:
+    src: oauth2-proxy.cfg.j2
+    dest: "{{ keycloak_stack_dir }}/oauth2-proxy.cfg"
+    owner: root
+    group: root
+    mode: "0644"
+  register: oauth2_proxy_config_state
+
+- name: Deploy the compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ keycloak_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+# `auto` recreates a service whose definition changed in compose.yml. It cannot
+# see a changed secret file, nor the mounted oauth2-proxy.cfg: those force it.
+- name: Bring keycloak and its database up
+  community.docker.docker_compose_v2:
+    project_src: "{{ keycloak_stack_dir }}"
+    files: [compose.yml]
+    services: [postgres, keycloak]
+    state: present
+    wait: true
+    wait_timeout: "{{ keycloak_wait_timeout }}"
+    recreate: "{{ 'always' if keycloak_secrets_state.changed else 'auto' }}"
+
+- name: Configure the realm
+  ansible.builtin.include_tasks: configure.yml
+
+- name: Take the accounts over from Authelia
+  ansible.builtin.include_tasks: migrate_authelia.yml
+  when: keycloak_migrate_from_authelia | bool
+
+- name: Bring oauth2-proxy up
+  community.docker.docker_compose_v2:
+    project_src: "{{ keycloak_stack_dir }}"
+    files: [compose.yml]
+    services: [oauth2-proxy]
+    state: present
+    wait: true
+    wait_timeout: "{{ keycloak_wait_timeout }}"
+    recreate: >-
+      {{ 'always' if (keycloak_secrets_state.changed
+                      or oauth2_proxy_config_state.changed) else 'auto' }}
+
+# compose's wait only means "running" for a container without a healthcheck,
+# and oauth2-proxy is running while it restarts in a loop on a discovery error.
+# /ping only answers once it got past that.
+- name: Wait for oauth2-proxy to answer
+  ansible.builtin.uri:
+    url: "http://{{ docker_publish_address }}:{{ oauth2_proxy_port }}/ping"
+  register: oauth2_proxy_ping
+  retries: 20
+  delay: 3
+  until: oauth2_proxy_ping.status | default(0) == 200

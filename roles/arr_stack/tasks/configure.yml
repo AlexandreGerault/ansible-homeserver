@@ -168,7 +168,7 @@
       fields:
         # The URL Prowlarr tells the application to call back on. It has to be
         # the container name: the application resolves it on the media network,
-        # and the public vhost would land on Authelia.
+        # and the public vhost would land on the SSO.
         - name: prowlarrUrl
           value: "http://prowlarr:{{ arr_ports.prowlarr }}"
         - name: baseUrl

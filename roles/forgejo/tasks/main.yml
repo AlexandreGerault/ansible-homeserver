@@ -1,15 +1,15 @@
 ---
-# A git forge with a web interface, behind Authelia — but not behind Caddy's
+# A git forge with a web interface, behind Keycloak — but not behind Caddy's
 # forward_auth. That distinction is the whole design of this role: forward_auth
 # bounces every request without a session cookie to the login portal, which is
 # fine for a dashboard and fatal for a forge. `git clone`, `git push`, the API
 # and the webhooks all speak to it without a browser, so the vhost carries no
-# `protect: true` and Authelia sits one level deeper instead, as the OpenID
+# `protect: true` and Keycloak sits one level deeper instead, as the OpenID
 # Connect provider Forgejo delegates its login page to.
 #
 # Everything else follows from that: registration is open but external-only so
-# an Authelia account is the only way in, HTTP basic auth stays on so tokens
-# keep working, and the `admins` group in the vault is what grants
+# a Keycloak account is the only way in, HTTP basic auth stays on so tokens
+# keep working, and the `admins` group in Keycloak is what grants
 # administration here too.
 
 - name: Check the vault holds the forgejo secrets
@@ -26,9 +26,8 @@
       vault_forgejo_lfs_jwt_secret and vault_forgejo_oauth2_jwt_secret — from
       `docker run --rm codeberg.org/forgejo/forgejo:15 forgejo generate secret
       SECRET_KEY`, `… INTERNAL_TOKEN` and `… JWT_SECRET` (twice) — plus
-      vault_forgejo_oidc_client_secret, the OpenID Connect client secret in
-      clear, whose pbkdf2 digest goes in vault_forgejo_oidc_client_secret_digest
-      for Authelia. Both come out of one command; see the README.
+      vault_forgejo_oidc_client_secret, the OpenID Connect client secret, which
+      the keycloak role registers as is. See the README.
     quiet: true
 
 - name: Check the vault holds the SMTP password
@@ -104,6 +103,6 @@
         source: "{{ forgejo_config_dir }}"
         target: /data/gitea/conf
 
-- name: Wire the Authelia authentication source
+- name: Wire the Keycloak authentication source
   ansible.builtin.include_tasks: oidc.yml
   when: forgejo_oidc_configure | bool

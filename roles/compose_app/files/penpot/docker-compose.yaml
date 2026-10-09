@@ -24,7 +24,7 @@
 # WARNING: if you're exposing Penpot to the internet, you should remove the flags
 # 'disable-secure-session-cookies' and 'disable-email-verification'
 x-flags: &penpot-flags
-  # Login through Authelia only: the password form and the sign-up page are gone,
+  # Login through Keycloak only: the password form and the sign-up page are gone,
   # and oidc-registration still lets a first OIDC login create the profile.
   PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-login-with-oidc enable-oidc-registration disable-registration disable-login-with-password
 
@@ -150,14 +150,15 @@ services:
 
       PENPOT_REDIS_URI: redis://penpot-valkey/0
 
-      ## OpenID Connect against Authelia — the values come from .env, which the
+      ## OpenID Connect against Keycloak — the values come from .env, which the
       ## compose_app role templates from penpot.env.j2.
 
       PENPOT_OIDC_CLIENT_ID: ${PENPOT_OIDC_CLIENT_ID}
       PENPOT_OIDC_CLIENT_SECRET: ${PENPOT_OIDC_CLIENT_SECRET}
       PENPOT_OIDC_BASE_URI: ${PENPOT_OIDC_BASE_URI}
       PENPOT_OIDC_SCOPES: openid profile email
-      ## Authelia's ID token carries no email or name; the userinfo endpoint does.
+      ## The userinfo endpoint is the one place every provider puts the email
+      ## and the name; Authelia's ID token had neither.
       PENPOT_OIDC_USER_INFO_SOURCE: userinfo
 
       ## Default configuration for assets storage: using filesystem based with all files

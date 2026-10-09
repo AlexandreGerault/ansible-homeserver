@@ -4,7 +4,7 @@
 qbittorrent_gluetun_image: qmcgaw/gluetun:v3.41.3
 qbittorrent_image: lscr.io/linuxserver/qbittorrent:5.2.3
 
-# Config lives in /etc and state in /var/lib, like authelia — not under
+# Config lives in /etc and state in /var/lib, like keycloak — not under
 # ~/apps with the other compose stacks. The VPN credentials are root-only, and
 # compose has to be able to read them.
 qbittorrent_stack_dir: /etc/qbittorrent
@@ -21,7 +21,7 @@ qbittorrent_media_mount: /data
 qbittorrent_downloads_mount: "{{ qbittorrent_media_mount }}/{{ qbittorrent_downloads_dir | relpath(jellyfin_media_root) }}"
 
 # Shared network gluetun joins alongside its own, so Sonarr and Radarr can reach
-# the WebUI at gluetun:8080 without going through Caddy and Authelia.
+# the WebUI at gluetun:8080 without going through Caddy and the SSO.
 media_network: media
 media_network_subnet: 10.89.0.0/24
 

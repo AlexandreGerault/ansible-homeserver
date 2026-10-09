@@ -1,0 +1,154 @@
+---
+# Authelia's accounts, password hashes included, into the realm. The hashes are
+# argon2id and Keycloak verifies argon2 natively: the filter in
+# filter_plugins/authelia.py only rewrites the PHC string as a Keycloak
+# credential, so every password keeps working without anyone knowing it. On the
+# first successful login Keycloak re-hashes it with its own parameters.
+#
+# The OpenID Connect subject Authelia gave each account becomes its Keycloak id,
+# which is what keeps Forgejo, AFFiNE and Penpot linked to the same local
+# accounts: they recognise a returning user by `sub`, not by name.
+
+- name: Look for Authelia's users database
+  ansible.builtin.stat:
+    path: "{{ authelia_config_dir }}/users_database.yml"
+  register: authelia_users_file
+
+- name: Look for an earlier import
+  ansible.builtin.stat:
+    path: "{{ keycloak_stack_dir }}/authelia-migrated"
+  register: authelia_migration_marker
+
+- name: Import the Authelia accounts
+  when:
+    - authelia_users_file.stat.exists
+    - not authelia_migration_marker.stat.exists
+  block:
+    - name: Check whether Authelia is still running
+      community.docker.docker_container_info:
+        name: authelia
+      register: authelia_container
+
+    # Authelia creates a subject the first time an account logs in to an OpenID
+    # Connect client, so an account that never did has none; Keycloak then picks
+    # a fresh id, and the client links it by email on its first login.
+    - name: Export the OpenID Connect subjects
+      ansible.builtin.command:
+        argv: [docker, exec, authelia, sh, -c,
+               "rm -f /data/opaque-identifiers.yml && authelia storage user identifiers export --file /data/opaque-identifiers.yml"]
+      when: authelia_container.container.State.Running | default(false)
+      changed_when: false
+
+    - name: Read the OpenID Connect subjects
+      ansible.builtin.slurp:
+        src: "{{ authelia_data_dir }}/opaque-identifiers.yml"
+      register: authelia_identifiers
+      when: authelia_container.container.State.Running | default(false)
+
+    - name: Read Authelia's users database
+      ansible.builtin.slurp:
+        src: "{{ authelia_config_dir }}/users_database.yml"
+      register: authelia_users
+      no_log: true
+
+    - name: Convert the accounts
+      ansible.builtin.set_fact:
+        authelia_users_db: "{{ authelia_users.content | b64decode | from_yaml }}"
+        authelia_identifiers_db: >-
+          {{ (authelia_identifiers.content | b64decode | from_yaml)
+             if authelia_identifiers.content is defined else {} }}
+      no_log: true
+
+    # The groups first: an account that names a group which does not exist is
+    # imported without it, silently.
+    - name: Create the groups the Authelia accounts belong to
+      community.general.keycloak_group:
+        auth_keycloak_url: "http://{{ docker_publish_address }}:{{ keycloak_port }}"
+        auth_realm: master
+        auth_client_id: admin-cli
+        auth_username: "{{ keycloak_admin_user }}"
+        auth_password: "{{ vault_keycloak_admin_password }}"
+        realm: "{{ keycloak_realm }}"
+        name: "{{ item }}"
+        state: present
+      loop: "{{ authelia_users_db | authelia_groups }}"
+
+    - name: Log in to the admin API
+      ansible.builtin.uri:
+        url: "http://{{ docker_publish_address }}:{{ keycloak_port }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: admin-cli
+          username: "{{ keycloak_admin_user }}"
+          password: "{{ vault_keycloak_admin_password }}"
+      register: keycloak_admin_token
+      no_log: true
+
+    # SKIP: an account that already exists in Keycloak is left alone, whatever
+    # its password there.
+    - name: Import the accounts
+      ansible.builtin.uri:
+        url: "http://{{ docker_publish_address }}:{{ keycloak_port }}/admin/realms/{{ keycloak_realm }}/partialImport"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ keycloak_admin_token.json.access_token }}"
+        body_format: json
+        body:
+          ifResourceExists: SKIP
+          users: "{{ authelia_users_db | authelia_to_keycloak_users(authelia_identifiers_db) }}"
+      register: authelia_import
+      no_log: true
+      changed_when: authelia_import.json.added | default(0) > 0
+
+    - name: Report what was imported
+      ansible.builtin.debug:
+        msg: >-
+          {% for r in authelia_import.json.results | default([]) -%}
+          {{ r.action | lower }} {{ r.resourceName }}{{ ', ' if not loop.last }}
+          {%- endfor %}
+
+    - name: Record the import
+      ansible.builtin.copy:
+        content: |
+          Accounts imported from {{ authelia_config_dir }}/users_database.yml
+          on {{ now(utc=true).isoformat() }}. Delete this file to import again;
+          accounts that already exist are skipped.
+          {% for r in authelia_import.json.results | default([]) %}
+          {{ r.action }} {{ r.resourceName }} {{ r.id }}
+          {% endfor %}
+        dest: "{{ keycloak_stack_dir }}/authelia-migrated"
+        owner: root
+        group: root
+        mode: "0600"
+
+  always:
+    - name: Remove the exported subjects
+      ansible.builtin.file:
+        path: "{{ authelia_data_dir }}/opaque-identifiers.yml"
+        state: absent
+
+# Retired only once its accounts are in Keycloak: a run that failed above leaves
+# it running, and the import can be tried again.
+- name: Look for the import again
+  ansible.builtin.stat:
+    path: "{{ keycloak_stack_dir }}/authelia-migrated"
+  register: authelia_migration_marker
+
+- name: Remove the authelia container
+  community.docker.docker_container:
+    name: authelia
+    state: absent
+  when: authelia_migration_marker.stat.exists or not authelia_users_file.stat.exists
+
+- name: Remove Authelia's files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ authelia_config_dir }}"
+    - "{{ authelia_data_dir }}"
+  when:
+    - authelia_remove_data | bool
+    - authelia_migration_marker.stat.exists

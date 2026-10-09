@@ -1,0 +1,117 @@
+---
+# Keycloak is the identity provider; oauth2-proxy is what Caddy's forward_auth
+# talks to for the `protect: true` vhosts, since Keycloak has no forward-auth
+# endpoint of its own. Both, and Keycloak's Postgres, are one compose project in
+# keycloak_stack_dir, for the same reason as qbittorrent: compose is what orders
+# their startup.
+keycloak_image: quay.io/keycloak/keycloak:26.7.5
+keycloak_postgres_image: postgres:17
+oauth2_proxy_image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+
+keycloak_stack_dir: /etc/keycloak
+keycloak_data_dir: /var/lib/keycloak
+
+keycloak_domain: auth.alexandre-gerault.fr
+keycloak_root_domain: alexandre-gerault.fr
+keycloak_port: 8180
+oauth2_proxy_port: 4180
+docker_publish_address: "127.0.0.1"
+# The docker address pool, from docker_daemon_options: where Caddy's requests
+# appear to come from once they cross the published port.
+docker_address_pool: 10.0.0.0/8
+
+# The uids the three images run as. Compose secrets are bind mounts of the host
+# file, permissions included, so each secret file is owned by the uid that has
+# to read it and nobody else — not root:0600 as with gluetun, which runs as root.
+keycloak_uid: 1000
+keycloak_postgres_uid: 999
+oauth2_proxy_uid: 65532
+
+# The bootstrap administrator of the master realm, created on the very first
+# start only. The role logs in as it to configure the realm below. Keycloak
+# labels it "temporary" in the console; that is cosmetic.
+keycloak_admin_user: admin
+
+# How long to wait for each container to report healthy. Keycloak's first start
+# builds its Quarkus application and creates its schema: about a minute on the
+# EliteDesk.
+keycloak_wait_timeout: 300
+
+# =============================================================================
+# The realm
+# =============================================================================
+keycloak_realm: homeserver
+keycloak_realm_display_name: Homeserver
+keycloak_default_locale: fr
+keycloak_supported_locales: [fr, en]
+
+# Same numbers Authelia ran with: a session dies after 15 minutes of inactivity
+# or one hour in all, unless "remember me" was ticked, which holds it a month.
+keycloak_sso_session_idle_timeout: 900
+keycloak_sso_session_max_lifespan: 3600
+keycloak_remember_me_lifespan: 2592000
+
+# Brute force protection, again Authelia's regulation: three failures within two
+# minutes lock the account for five.
+keycloak_failure_factor: 3
+keycloak_failure_reset_seconds: 120
+keycloak_lockout_seconds: 300
+
+# Groups that exist whatever accounts are migrated. Forgejo's admin group must
+# be one of them.
+keycloak_groups: []
+
+# OpenID Connect clients, besides oauth2-proxy which the role adds itself.
+#   id, name:        client_id and the label in the console
+#   secret:          the client secret, in clear — Keycloak stores it as given
+#   redirect_uris:   exact callback URLs
+#   pkce:            true (the default) to require S256, false for clients that
+#                    cannot do it
+#   groups:          true to put the `groups` claim in the tokens
+#   protocol_mappers:extra mappers, as Keycloak representations
+keycloak_oidc_clients: []
+
+# =============================================================================
+# oauth2-proxy
+# =============================================================================
+# The session cookie lives on the parent domain, so one login covers every
+# protected vhost — the same single sign-on Authelia's cookie gave. It outlives
+# the Keycloak session on purpose: oauth2-proxy refreshes against Keycloak every
+# oauth2_proxy_cookie_refresh, and that refresh is what fails once the Keycloak
+# session above has expired.
+oauth2_proxy_cookie_expire: 720h
+oauth2_proxy_cookie_refresh: 5m
+
+# =============================================================================
+# Mail, from group_vars. Empty smtp_host leaves the realm without a mail
+# server, which turns "forgot password" into a dead end.
+# =============================================================================
+smtp_host: ""
+smtp_port: 465
+smtp_username: ""
+smtp_sender: ""
+
+# =============================================================================
+# Taking over from Authelia
+# =============================================================================
+# On the first run that finds Authelia's users database, the accounts in it are
+# imported with their password hashes as they are — nobody has to reset
+# anything. The source is the file on the server, not the vault: it is what
+# Authelia actually authenticated against.
+#
+# The import runs once. A marker file in keycloak_stack_dir records it, so an
+# account deleted in Keycloak afterwards does not come back on the next run.
+# Delete the marker to import again; accounts that already exist are skipped,
+# never overwritten.
+keycloak_migrate_from_authelia: true
+authelia_config_dir: /etc/authelia
+authelia_data_dir: /var/lib/authelia
+
+# Once the import is done the Authelia container is removed. Its files stay
+# until this is true: they hold the TOTP secrets and the WebAuthn devices, which
+# Keycloak cannot take over, and a copy of every password hash.
+authelia_remove_data: false
+
+# The tasks that carry a secret in their arguments or in their result.
+# keycloak_no_log=false for one run to see why one of them failed.
+keycloak_no_log: true
