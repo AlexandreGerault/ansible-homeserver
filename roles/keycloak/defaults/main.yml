@@ -32,6 +32,16 @@ oauth2_proxy_uid: 65532
 # labels it "temporary" in the console; that is cosmetic.
 keycloak_admin_user: admin
 
+# Memory ceilings. The server has 8 GB and little swap, most of it already
+# taken by the other stacks; Keycloak without a limit sizes its JVM from the
+# host's RAM, and its first start froze the server for an hour. 1 GB is plenty
+# for a realm of a few accounts and clients; the heap gets 65% of it, the rest
+# goes to the JVM's own overhead.
+keycloak_mem_limit: 1g
+keycloak_heap_percentage: 65
+keycloak_postgres_mem_limit: 256m
+oauth2_proxy_mem_limit: 64m
+
 # How long to wait for each container to report healthy. Keycloak's first start
 # builds its Quarkus application and creates its schema: about a minute on the
 # EliteDesk.
