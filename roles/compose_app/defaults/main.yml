@@ -3,5 +3,7 @@
 #   name:         directory name under apps_root, also the compose project name
 #   compose_file: file name expected by the stack (compose.yml, docker-compose.yaml, ...)
 #   env:          true when the stack needs a templated .env file
+#   templates:    other files to template, each {src, dest, owner, mode};
+#                 a change recreates the stack like a .env change does
 compose_app: {}
 apps_root: "/home/{{ homeserver_user }}/apps"

@@ -26,11 +26,29 @@
   register: env_file_state
   when: compose_app.env | default(false)
 
+# Files an application reads besides its .env, wherever it mounts them from —
+# AFFiNE's config.json lives in a directory its container created as root.
+- name: "Deploy the {{ compose_app.name }} extra files"
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner | default(homeserver_user) }}"
+    group: "{{ item.owner | default(homeserver_user) }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop: "{{ compose_app.templates | default([]) }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: extra_files_state
+  no_log: true
+
 - name: "Bring the {{ compose_app.name }} stack up"
   community.docker.docker_compose_v2:
     project_src: "{{ apps_root }}/{{ compose_app.name }}"
     files: ["{{ compose_app.compose_file }}"]
     state: present
-    recreate: "{{ 'always' if (compose_file_state.changed or env_file_state.changed | default(false)) else 'auto' }}"
+    recreate: >-
+      {{ 'always' if (compose_file_state.changed
+                      or env_file_state.changed | default(false)
+                      or extra_files_state.changed | default(false)) else 'auto' }}
   become: true
   become_user: "{{ homeserver_user }}"

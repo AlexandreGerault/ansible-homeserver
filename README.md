@@ -36,12 +36,12 @@ Services reachable from the outside, all proxied by Caddy:
 
 | Domain | Upstream |
 | --- | --- |
-| `dashboard.homelab.alexandre-gerault.fr` | homepage, 8097 |
+| `dashboard.homelab.alexandre-gerault.fr` | homepage, 8097 — **behind the SSO** |
 | `bibliofilm.alexandre-gerault.fr` | jellyfin, 8096 |
-| `affine.alexandre-gerault.fr` | affine, 3010 |
-| `penpot.alexandre-gerault.fr` | penpot, 9001 |
+| `affine.alexandre-gerault.fr` | affine, 3010 — SSO through OpenID Connect, password login kept |
+| `penpot.alexandre-gerault.fr` | penpot, 9001 — SSO through OpenID Connect only |
 | `scholarsome.alexandre-gerault.fr` | scholarsome, 4444 |
-| `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 |
+| `monitor.alexandre-gerault.fr` | uptime-kuma, 3001 — **behind the SSO** |
 | `arbitrageffv.alexandre-gerault.fr` | arbitrage_ffv, 8000 |
 | `authelia.alexandre-gerault.fr` | authelia, 8098 |
 | `torrent.alexandre-gerault.fr` | qbittorrent, 8099 — **behind the SSO** |
@@ -84,6 +84,8 @@ The vault holds:
 | `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
 | `vault_forgejo_oidc_client_secret` | `forgejo` — the OpenID Connect client secret, in clear |
 | `vault_forgejo_oidc_client_secret_digest` | `authelia` — the pbkdf2 digest of that same secret |
+| `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
+| `vault_affine_oidc_client_secret_digest`, `vault_penpot_oidc_client_secret_digest` | `authelia` — their pbkdf2 digests |
 
 The four *arr keys are yours to pick rather than the applications': generating
 them here is what lets the playbook wire Prowlarr to Sonarr and Radarr, and lets
@@ -176,6 +178,29 @@ docker run --rm ghcr.io/authelia/authelia:4.39 \
 Changing the client secret afterwards means telling Forgejo about it: the
 authentication source lives in its database, not in a file, so set
 `forgejo_oidc_update: true` for one run.
+
+## Signing in through Authelia
+
+Besides the `protect: true` vhosts, three applications delegate their login to
+Authelia over OpenID Connect, each as a client in `authelia_oidc_clients`:
+
+- **Forgejo** — see "The git forge".
+- **AFFiNE** reads its provider from `config.json`, templated by `compose_app`
+  into the directory its container mounts as `~/.affine/config`. The first
+  Authelia login of an existing account is matched by email and linked to it.
+  Password login is kept: two of its accounts have addresses no Authelia user
+  carries, and those people would otherwise be locked out.
+- **Penpot** has neither a password form nor a sign-up page any more
+  (`disable-login-with-password`, `disable-registration`); a first Authelia
+  login creates the profile (`enable-oidc-registration`). It had no account when
+  this was switched on.
+
+**Uptime Kuma** sits behind forward_auth with its own authentication turned off —
+the `disableAuth` setting, written once into its database on 2026-09-15. That
+setting lives in Kuma's data, not in this repository: a fresh Kuma asks for an
+admin account again, and the setting has to be set again in Settings → Security.
+With it off, whoever reaches `127.0.0.1:3001` on the host has full control, the
+same trade-off as the *arr `External` authentication.
 
 ## Outgoing mail
 

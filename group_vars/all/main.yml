@@ -96,6 +96,7 @@ caddy_sites:
   - name: homepage
     domain: dashboard.homelab.alexandre-gerault.fr
     upstream_port: 8097
+    protect: true
   - name: jellyfin
     domain: bibliofilm.alexandre-gerault.fr
     upstream_port: 8096
@@ -116,6 +117,7 @@ caddy_sites:
     domain: monitor.alexandre-gerault.fr
     upstream_port: 3001
     log: true
+    protect: true
   - name: penpot
     domain: penpot.alexandre-gerault.fr
     upstream_port: 9001
@@ -188,6 +190,25 @@ authelia_oidc_clients:
     policy: one_factor
     redirect_uris:
       - "https://git.alexandre-gerault.fr/user/oauth2/authelia/callback"
+  # AFFiNE sends its secret in the form body and always uses PKCE (S256).
+  - id: affine
+    name: AFFiNE
+    secret_digest: "{{ vault_affine_oidc_client_secret_digest }}"
+    policy: one_factor
+    token_endpoint_auth_method: client_secret_post
+    scopes: [openid, email, profile]
+    redirect_uris:
+      - "https://affine.alexandre-gerault.fr/oauth/callback"
+  # Penpot sends its secret in the form body and does not implement PKCE.
+  - id: penpot
+    name: Penpot
+    secret_digest: "{{ vault_penpot_oidc_client_secret_digest }}"
+    policy: one_factor
+    token_endpoint_auth_method: client_secret_post
+    require_pkce: false
+    scopes: [openid, email, profile]
+    redirect_uris:
+      - "https://penpot.alexandre-gerault.fr/api/auth/oauth/oidc/callback"
 
 # =============================================================================
 # Outgoing mail — one account on the mail server, shared by Authelia, Forgejo
@@ -310,12 +331,19 @@ compose_apps:
     compose_file: compose.yaml
   - name: penpot
     compose_file: docker-compose.yaml
+    env: true
   - name: scholarsome
     compose_file: compose.yml
     env: true
   - name: affine
     compose_file: docker-compose.yml
     env: true
+    templates:
+      # The OpenID Connect provider. AFFiNE reads config.json from
+      # ~/.affine/config, which the compose file mounts from here.
+      - src: affine.config.json.j2
+        dest: "/home/{{ homeserver_user }}/.affine/self-host/config/config.json"
+        owner: root
 
 # What AFFiNE builds the links in its mails from.
 affine_external_url: https://affine.alexandre-gerault.fr

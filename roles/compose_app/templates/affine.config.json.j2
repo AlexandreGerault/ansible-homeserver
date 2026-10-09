@@ -1,0 +1,14 @@
+{
+  "oauth": {
+    "providers": {
+      "oidc": {
+        "clientId": "affine",
+        "clientSecret": {{ vault_affine_oidc_client_secret | to_json }},
+        "issuer": "https://{{ authelia_domain }}",
+        "args": {
+          "scope": "openid profile email"
+        }
+      }
+    }
+  }
+}

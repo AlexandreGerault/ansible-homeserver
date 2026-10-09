@@ -99,8 +99,12 @@ identity_providers:
         client_secret: '{{ client.secret_digest }}'
         public: false
         authorization_policy: '{{ client.policy | default('one_factor') }}'
+{% if client.require_pkce | default(true) %}
         require_pkce: true
         pkce_challenge_method: 'S256'
+{% else %}
+        require_pkce: false
+{% endif %}
         redirect_uris:
 {% for uri in client.redirect_uris %}
           - '{{ uri }}'
@@ -118,6 +122,6 @@ identity_providers:
         # implement JWT-signed variants.
         access_token_signed_response_alg: 'none'
         userinfo_signed_response_alg: 'none'
-        token_endpoint_auth_method: 'client_secret_basic'
+        token_endpoint_auth_method: '{{ client.token_endpoint_auth_method | default('client_secret_basic') }}'
 {% endfor %}
 {% endif %}
