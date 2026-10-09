@@ -5,7 +5,8 @@
 #
 # Accounts are deliberately not in here: they live in Keycloak's database, are
 # managed in its console, and the only ones this role ever writes are the ones
-# it takes over from Authelia, once.
+# it takes over from Authelia, once. admins.yml, after the import, only gives
+# existing accounts the realm-admin role.
 
 - name: Configure the realm
   module_defaults:

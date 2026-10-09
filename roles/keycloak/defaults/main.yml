@@ -70,6 +70,12 @@ keycloak_lockout_seconds: 300
 # be one of them.
 keycloak_groups: []
 
+# Accounts of the realm that administer it, from its own admin console
+# (/admin/<realm>/console/), with the realm-admin role. The role adds the role,
+# never removes it: taking an account off this list leaves it administrator
+# until the role is unassigned in the console.
+keycloak_realm_admins: []
+
 # OpenID Connect clients, besides oauth2-proxy which the role adds itself.
 #   id, name:        client_id and the label in the console
 #   secret:          the client secret, in clear — Keycloak stores it as given

@@ -1,0 +1,19 @@
+---
+# realm-admin is the realm-management client role that opens the realm's admin
+# console, https://<keycloak_domain>/admin/<realm>/console/, to an account of
+# that realm. It runs after the import, since the accounts it names are usually
+# the migrated ones; an account that does not exist fails the task.
+- name: Make the realm administrators
+  community.general.keycloak_user_rolemapping:
+    auth_keycloak_url: "http://{{ docker_publish_address }}:{{ keycloak_port }}"
+    auth_realm: master
+    auth_client_id: admin-cli
+    auth_username: "{{ keycloak_admin_user }}"
+    auth_password: "{{ vault_keycloak_admin_password }}"
+    realm: "{{ keycloak_realm }}"
+    target_username: "{{ item }}"
+    client_id: realm-management
+    roles:
+      - name: realm-admin
+    state: present
+  loop: "{{ keycloak_realm_admins }}"

@@ -118,6 +118,10 @@
   ansible.builtin.include_tasks: migrate_authelia.yml
   when: keycloak_migrate_from_authelia | bool
 
+- name: Make the realm administrators
+  ansible.builtin.include_tasks: admins.yml
+  when: keycloak_realm_admins | length > 0
+
 - name: Bring oauth2-proxy up
   community.docker.docker_compose_v2:
     project_src: "{{ keycloak_stack_dir }}"

@@ -189,6 +189,10 @@ caddy_forward_auth_upstream: "127.0.0.1:4180"
 
 keycloak_groups:
   - "{{ forgejo_oidc_admin_group }}"
+# Administrators of the realm, in its own console — not of the master realm,
+# whose `admin` account is the role's.
+keycloak_realm_admins:
+  - alexandregerault
 
 # Applications that log in *through* Keycloak instead of sitting behind
 # forward_auth. The secrets are the ones the applications already held when

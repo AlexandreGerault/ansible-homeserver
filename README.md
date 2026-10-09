@@ -133,9 +133,11 @@ the Keycloak session is ended too (account console → Sign out).
 ## Accounts
 
 Accounts live in **Keycloak's database**, not in the vault, and are managed in
-the console: `https://auth.alexandre-gerault.fr/admin/homeserver/console/`,
-signed in as `admin` with `vault_keycloak_admin_password` on the *master*
-realm's login page (`/admin/`). Users → Add user, then Credentials → Set
+the realm's console: `https://auth.alexandre-gerault.fr/admin/homeserver/console/`,
+signed in with your own account and password — the accounts listed in
+`keycloak_realm_admins` get the realm's `realm-admin` role. The master realm's
+`admin` (`vault_keycloak_admin_password`, at `/admin/`) is the role's own
+account, the way back in if no realm administrator is left. Users → Add user, then Credentials → Set
 password; tick *Email verified*, untick *Temporary* unless you want them to
 choose their own. Membership of `admins` is what makes someone a Forgejo
 administrator.
