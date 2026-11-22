@@ -30,6 +30,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `keycloak` | The SSO: Keycloak, its Postgres, the realm and its clients, and oauth2-proxy for `forward_auth` |
 | `forgejo` | The git forge, its `app.ini` and the Keycloak authentication source |
 | `forgejo_runner` | The Forgejo Actions runner and the Docker-in-Docker daemon its jobs run on |
+| `job_applications` | The internship-search tracker from the forge's registry: web, queue worker and scheduler |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
@@ -52,6 +53,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `bazarr.alexandre-gerault.fr` | bazarr, 6767 — **behind the SSO** |
 | `requests.alexandre-gerault.fr` | jellyseerr, 5055 — authenticates against Jellyfin instead |
 | `git.alexandre-gerault.fr` | forgejo, 3030 — SSO through OpenID Connect, *not* forward_auth |
+| `jobs.alexandre-gerault.fr` | job-applications, 8085 — **behind the SSO**, and signs in through OpenID Connect |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
 ## Variables
@@ -86,6 +88,9 @@ The vault holds:
 | `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
 | `vault_forgejo_oidc_client_secret` | `forgejo` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_forgejo_runner_secret` | `forgejo_runner` — 40 hex characters, the runner's offline registration secret and token |
+| `vault_job_applications_app_key` | `job_applications` — Laravel's `APP_KEY`, `base64:` + 32 random bytes; the passkeys are derived from it, so it is never regenerated |
+| `vault_job_applications_oidc_client_secret` | `job_applications` and `keycloak` — the OpenID Connect client secret, in clear |
+| `vault_job_applications_registry_token` | `job_applications` — a Forgejo personal access token of `alexandregerault`, scope `read:package`, to pull the image |
 | `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` and `keycloak` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
 
 The four *arr keys are yours to pick rather than the applications': generating

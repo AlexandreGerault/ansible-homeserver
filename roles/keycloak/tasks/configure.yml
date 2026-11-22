@@ -162,8 +162,10 @@
         # attribute at all rather than an empty one, which would show as a change
         # on every run. The flip side: turning pkce off for a client that had it
         # means clearing the field in the console once.
+        # `+` reuses the redirect URIs; a client whose logout lands elsewhere
+        # (job-applications returns to its home page) lists its own.
         attributes: >-
-          {{ {'post.logout.redirect.uris': '+'}
+          {{ {'post.logout.redirect.uris': item.post_logout_redirect_uris | default(['+']) | join('##')}
              | combine({'pkce.code.challenge.method': 'S256'} if item.pkce | default(true) else {}) }}
         default_client_scopes: >-
           {{ ['basic', 'acr', 'web-origins', 'roles', 'profile', 'email']

@@ -1,0 +1,48 @@
+---
+# The internship-search tracker, built from
+# https://git.alexandre-gerault.fr/alexandregerault/job-applications and pulled
+# from Forgejo's own container registry. `latest` on purpose: the image is ours,
+# and every run pulls it, so a playbook run is also how a new build is deployed.
+job_applications_image: git.alexandre-gerault.fr/alexandregerault/job-applications:latest
+
+# The registry sits behind REQUIRE_SIGNIN_VIEW like the rest of the forge, so
+# pulling needs an account: this one, with a personal access token that has
+# only the read:package scope (vault_job_applications_registry_token).
+job_applications_registry: git.alexandre-gerault.fr
+job_applications_registry_username: alexandregerault
+
+# Shown in the page titles and as the sender name of the reminder mails.
+job_applications_app_name: Jobiflow
+job_applications_domain: jobs.alexandre-gerault.fr
+job_applications_port: 8085
+
+# compose.yml and .env here; the SQLite database and the attachments in the two
+# named volumes the compose file declares, as the upstream compose.prod.yaml
+# does — the image's www-data owns their content from the first start.
+job_applications_stack_dir: /etc/job-applications
+
+job_applications_locale: fr
+
+# Follow-up reminder and auto-expiry delays, in days.
+job_applications_follow_up_after_days: 7
+job_applications_expire_after_days: 14
+
+# OpenID Connect against the homeserver realm. The client is declared in
+# keycloak_oidc_clients (group_vars), with the same secret.
+job_applications_oidc_client_id: job-applications
+job_applications_oidc_display_name: Keycloak
+
+# How long the web container may take to become healthy: it runs the database
+# migrations before it answers /up.
+job_applications_wait_timeout: 180
+
+# Inherited from group_vars; defaulted here so the role still renders on its own.
+keycloak_domain: auth.alexandre-gerault.fr
+keycloak_realm: homeserver
+docker_publish_address: "127.0.0.1"
+docker_address_pool: 10.0.0.0/8
+common_timezone: Etc/UTC
+smtp_host: ""
+smtp_port: 465
+smtp_username: ""
+smtp_sender: ""

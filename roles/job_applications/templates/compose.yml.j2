@@ -1,0 +1,55 @@
+# {{ ansible_managed }}
+#
+# The upstream compose.prod.yaml, minus the build: one image, three roles. Only
+# the web container publishes a port, on the loopback, behind Caddy.
+name: job-applications
+
+x-app: &app
+  image: {{ job_applications_image }}
+  pull_policy: always
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - database-data:/var/www/html/database/data
+    - storage-app:/var/www/html/storage/app
+
+services:
+  web:
+    <<: *app
+    container_name: job-applications
+    ports:
+      - "{{ docker_publish_address }}:{{ job_applications_port }}:8080"
+    # Health check: the image's own HEALTHCHECK on /up.
+
+  # Migrations and caches run in the web container only.
+  queue:
+    <<: *app
+    container_name: job-applications-queue
+    command: [php, artisan, queue:work, --tries=3, --max-time=3600]
+    environment:
+      AUTORUN_ENABLED: "false"
+    stop_signal: SIGTERM
+    healthcheck:
+      test: [CMD, healthcheck-queue]
+      start_period: 10s
+    depends_on:
+      web:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    container_name: job-applications-scheduler
+    command: [php, artisan, schedule:work]
+    environment:
+      AUTORUN_ENABLED: "false"
+    stop_signal: SIGTERM
+    healthcheck:
+      test: [CMD, healthcheck-schedule]
+      start_period: 10s
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  database-data:
+  storage-app:

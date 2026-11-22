@@ -1,0 +1,80 @@
+---
+# The internship-search tracker: a Laravel app on FrankenPHP, as web, queue
+# worker and scheduler, on SQLite. It signs in through Keycloak with its own
+# OpenID Connect client — and it is *also* behind forward_auth
+# (`protect: true` in caddy_sites), unlike Forgejo, because the app keeps a
+# local registration form that no setting turns off. With forward_auth in
+# front, only a Keycloak account reaches that form, and the app's own SSO
+# button then goes through without a second password: the Keycloak session is
+# already open.
+
+- name: Check the vault holds the job-applications secrets
+  ansible.builtin.assert:
+    that:
+      - vault_job_applications_app_key | default('') is match('^base64:')
+      - vault_job_applications_oidc_client_secret | default('') | length >= 32
+      - vault_job_applications_registry_token | default('') | length > 0
+    fail_msg: >-
+      Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_job_applications_app_key (`base64:` + 32 random bytes in base64),
+      vault_job_applications_oidc_client_secret, and
+      vault_job_applications_registry_token — a Forgejo personal access token
+      with the read:package scope. See the README.
+    quiet: true
+
+- name: Check the vault holds the SMTP password
+  ansible.builtin.assert:
+    that:
+      - vault_smtp_password | default('') | length > 0
+    fail_msg: >-
+      smtp_host is set, so the follow-up reminders need vault_smtp_password in
+      group_vars/all/vault.yml.
+    quiet: true
+  when: smtp_host | length > 0
+
+# In root's ~/.docker/config.json: compose runs as root below and pulls with it.
+- name: Log in to the forgejo container registry
+  community.docker.docker_login:
+    registry_url: "{{ job_applications_registry }}"
+    username: "{{ job_applications_registry_username }}"
+    password: "{{ vault_job_applications_registry_token }}"
+  no_log: true
+
+- name: Ensure the job-applications directory exists
+  ansible.builtin.file:
+    path: "{{ job_applications_stack_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy the job-applications environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ job_applications_stack_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  register: job_applications_env_state
+
+- name: Deploy the job-applications compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ job_applications_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+# pull: always fetches `latest` on every run; `auto` then recreates the
+# containers whose image moved. A changed .env is invisible to compose, hence
+# the forced recreate.
+- name: Bring the job-applications stack up
+  community.docker.docker_compose_v2:
+    project_src: "{{ job_applications_stack_dir }}"
+    files: [compose.yml]
+    state: present
+    pull: always
+    wait: true
+    wait_timeout: "{{ job_applications_wait_timeout }}"
+    recreate: "{{ 'always' if job_applications_env_state.changed else 'auto' }}"
