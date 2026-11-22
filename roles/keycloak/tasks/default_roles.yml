@@ -1,0 +1,57 @@
+---
+# Keycloak gives default-roles-<realm> to an account it creates itself — from
+# the console, a registration, a first broker login — but not to one that comes
+# in through partialImport, which is how the Authelia accounts arrived. Without
+# it an account has no view-profile or manage-account, and the account console
+# at /realms/<realm>/account answers every login with "Something went wrong".
+# So the role is checked on every account, every run, and added where missing.
+
+- name: Get an admin token for the default roles
+  ansible.builtin.uri:
+    url: "http://{{ docker_publish_address }}:{{ keycloak_port }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      client_id: admin-cli
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ vault_keycloak_admin_password }}"
+  register: keycloak_default_roles_token
+  no_log: true
+
+- name: Read the realm's default role
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api }}/roles/default-roles-{{ keycloak_realm }}"
+    headers: "{{ keycloak_admin_headers }}"
+  register: keycloak_default_role
+
+- name: List the realm's accounts
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api }}/users?briefRepresentation=true&max=-1"
+    headers: "{{ keycloak_admin_headers }}"
+  register: keycloak_realm_users
+
+- name: Read each account's realm roles
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api }}/users/{{ item.id }}/role-mappings/realm"
+    headers: "{{ keycloak_admin_headers }}"
+  loop: "{{ keycloak_realm_users.json }}"
+  loop_control:
+    label: "{{ item.username }}"
+  register: keycloak_user_realm_roles
+
+- name: Give the default role to the accounts that lack it
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api }}/users/{{ item.item.id }}/role-mappings/realm"
+    method: POST
+    headers: "{{ keycloak_admin_headers }}"
+    body_format: json
+    body:
+      - id: "{{ keycloak_default_role.json.id }}"
+        name: "{{ keycloak_default_role.json.name }}"
+    status_code: [204]
+  changed_when: true
+  loop: "{{ keycloak_user_realm_roles.results }}"
+  loop_control:
+    label: "{{ item.item.username }}"
+  when: keycloak_default_role.json.name not in (item.json | map(attribute='name'))

@@ -122,6 +122,13 @@
   ansible.builtin.include_tasks: admins.yml
   when: keycloak_realm_admins | length > 0
 
+- name: Give every account the realm's default roles
+  ansible.builtin.include_tasks: default_roles.yml
+  vars:
+    keycloak_admin_api: "http://{{ docker_publish_address }}:{{ keycloak_port }}/admin/realms/{{ keycloak_realm }}"
+    keycloak_admin_headers:
+      Authorization: "Bearer {{ keycloak_default_roles_token.json.access_token }}"
+
 - name: Bring oauth2-proxy up
   community.docker.docker_compose_v2:
     project_src: "{{ keycloak_stack_dir }}"
