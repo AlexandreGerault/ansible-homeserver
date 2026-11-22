@@ -309,6 +309,10 @@ forgejo_ssh_port: 22
 # created by the keycloak role; membership is managed in the Keycloak console.
 forgejo_oidc_admin_group: admins
 
+# Forgejo Actions, with one instance-wide runner from the forgejo_runner role.
+# Jobs run on a Docker-in-Docker daemon of their own, never on the host's.
+forgejo_actions_enabled: true
+
 # =============================================================================
 # Homepage
 # =============================================================================

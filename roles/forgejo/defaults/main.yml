@@ -72,9 +72,9 @@ forgejo_require_signin_view: true
 # single best reason to run a forge with a web interface rather than bare git.
 forgejo_repo_indexer: true
 
-# Forgejo Actions. Left off: enabling it without a registered runner only fills
-# a queue nothing drains. Turning it on is a separate decision, and a runner is
-# a separate role.
+# Forgejo Actions. Off by default: enabling it without a registered runner only
+# fills a queue nothing drains. group_vars turns it on together with the
+# forgejo_runner role, which refuses to run while it is off.
 forgejo_actions_enabled: false
 
 # Forgejo's own OAuth2 *provider* — the one third-party apps would log in

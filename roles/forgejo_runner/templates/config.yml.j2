@@ -1,0 +1,40 @@
+# {{ ansible_managed }}
+#
+# Holds the runner token, hence mode 0640. Every key is documented in
+# `forgejo-runner generate-config`.
+
+log:
+  level: info
+  job_level: info
+
+runner:
+  capacity: {{ forgejo_runner_capacity }}
+  timeout: {{ forgejo_runner_timeout }}
+  labels:
+{% for label in forgejo_runner_labels %}
+    - {{ label | to_json }}
+{% endfor %}
+
+# actions/cache talks to a server the runner spawns itself. The jobs reach it on
+# the runner's address on {{ forgejo_runner_network }}, which they can: the dind
+# daemon NATs them out through that network.
+cache:
+  enabled: true
+  dir: /data/cache
+
+container:
+  # Empty: one throwaway network per job, inside the dind daemon.
+  network: ""
+  privileged: false
+  # No bind mounts from a workflow, and no Docker socket in the jobs.
+  valid_volumes: []
+  docker_host: "-"
+
+# Offline registration: the uuid is what `forgejo-cli actions register` printed
+# for this secret, and the token is the secret itself.
+server:
+  connections:
+    forgejo:
+      url: {{ forgejo_runner_instance_url | to_json }}
+      uuid: {{ forgejo_runner_uuid | to_json }}
+      token: {{ vault_forgejo_runner_secret | to_json }}

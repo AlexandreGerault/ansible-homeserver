@@ -1,0 +1,175 @@
+---
+# A Forgejo Actions runner, and the Docker daemon its jobs run on.
+#
+# The jobs do not get the host's Docker. A job is arbitrary code from whoever
+# can push a workflow, and a container started on the host daemon can mount /
+# — that is root on the box, next to Keycloak's database and the vault-derived
+# secrets in /etc. So the runner drives a Docker-in-Docker daemon instead: the
+# jobs see its containers and its images and nothing else. dind is privileged,
+# which is not a sandbox against a kernel exploit, but it does turn "any
+# workflow owns the host" into "a workflow would need one".
+#
+# Registration is offline: the same 40-hex secret is given to Forgejo through
+# its CLI and to the runner in its config file, so there is no token to copy
+# from the web interface and nothing to click.
+
+- name: Check the vault holds the runner secret
+  ansible.builtin.assert:
+    that:
+      - vault_forgejo_runner_secret | default('') is match('^[0-9a-f]{40}$')
+    fail_msg: >-
+      `ansible-vault edit group_vars/all/vault.yml` and add
+      vault_forgejo_runner_secret: 40 lowercase hex characters, from
+      `openssl rand -hex 20`. See the README.
+    quiet: true
+
+- name: Check Forgejo Actions is enabled
+  ansible.builtin.assert:
+    that:
+      - forgejo_actions_enabled | bool
+    fail_msg: >-
+      forgejo_actions_enabled is false: the runner would register and then find
+      no queue to poll. Set it to true in group_vars and run the forgejo tag.
+    quiet: true
+
+- name: Create the forgejo-runner service account
+  ansible.builtin.user:
+    name: "{{ forgejo_runner_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: "{{ forgejo_runner_data_dir }}"
+  register: forgejo_runner_account
+
+- name: Read the forgejo-runner group
+  ansible.builtin.group:
+    name: "{{ forgejo_runner_user }}"
+  register: forgejo_runner_group_state
+
+- name: Ensure the forgejo-runner directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_user }}"
+    mode: "0750"
+  loop:
+    - "{{ forgejo_runner_config_dir }}"
+    - "{{ forgejo_runner_data_dir }}"
+
+- name: Wait for forgejo to answer
+  ansible.builtin.uri:
+    url: "http://{{ docker_publish_address }}:{{ forgejo_web_port }}/api/healthz"
+    status_code: [200]
+  register: forgejo_runner_forgejo_health
+  retries: "{{ forgejo_wait_retries }}"
+  delay: "{{ forgejo_wait_delay }}"
+  until: forgejo_runner_forgejo_health.status | default(0) == 200
+
+# An upsert, keyed on the first 16 characters of the secret: run again with the
+# same secret it changes nothing and prints the same uuid, which is why this can
+# run on every play and still report no change. Instance-wide (no --scope), so
+# every repository can use the runner.
+- name: Register the runner with forgejo
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - --user
+      - git
+      - forgejo
+      - forgejo
+      - forgejo-cli
+      - actions
+      - register
+      - --name
+      - "{{ forgejo_runner_name }}"
+      - --secret
+      - "{{ vault_forgejo_runner_secret }}"
+  changed_when: false
+  register: forgejo_runner_register
+  no_log: "{{ forgejo_runner_no_log }}"
+
+- name: Read the runner uuid
+  ansible.builtin.set_fact:
+    forgejo_runner_uuid: >-
+      {{ forgejo_runner_register.stdout
+         | regex_search('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}') }}
+
+- name: Check forgejo returned a uuid
+  ansible.builtin.assert:
+    that:
+      - forgejo_runner_uuid | length == 36
+    fail_msg: >-
+      `forgejo-cli actions register` printed no uuid. Run again with
+      -e forgejo_runner_no_log=false to see its output — it shows the secret.
+    quiet: true
+
+- name: Deploy the runner configuration
+  ansible.builtin.template:
+    src: config.yml.j2
+    dest: "{{ forgejo_runner_config_dir }}/config.yml"
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart forgejo-runner
+
+- name: Create the forgejo-runner network
+  community.docker.docker_network:
+    name: "{{ forgejo_runner_network }}"
+    state: present
+
+# Plain TCP, no TLS: the port is published nowhere, and the network it listens
+# on holds only the runner. dockerd refuses an unauthenticated TCP socket unless
+# --tls=false says so out loud.
+- name: Run the docker-in-docker daemon
+  community.docker.docker_container:
+    name: forgejo-runner-dind
+    image: "{{ forgejo_runner_dind_image }}"
+    state: started
+    restart_policy: unless-stopped
+    privileged: true
+    command: [dockerd, -H, "tcp://0.0.0.0:2375", --tls=false]
+    env:
+      DOCKER_TLS_CERTDIR: ""
+    networks:
+      - name: "{{ forgejo_runner_network }}"
+    mounts:
+      - type: volume
+        source: "{{ forgejo_runner_docker_volume }}"
+        target: /var/lib/docker
+
+- name: Run the forgejo-runner container
+  community.docker.docker_container:
+    name: forgejo-runner
+    image: "{{ forgejo_runner_image }}"
+    state: started
+    restart_policy: unless-stopped
+    user: "{{ forgejo_runner_account.uid }}:{{ forgejo_runner_group_state.gid }}"
+    command: [forgejo-runner, daemon, --config, /etc/forgejo-runner/config.yml]
+    env:
+      DOCKER_HOST: tcp://forgejo-runner-dind:2375
+      HOME: /data
+      TZ: "{{ common_timezone }}"
+    networks:
+      - name: "{{ forgejo_runner_network }}"
+    mounts:
+      - type: bind
+        source: "{{ forgejo_runner_data_dir }}"
+        target: /data
+      - type: bind
+        source: "{{ forgejo_runner_config_dir }}"
+        target: /etc/forgejo-runner
+        read_only: true
+
+- name: Prune the job images every week
+  ansible.builtin.cron:
+    name: forgejo-runner image prune
+    cron_file: forgejo-runner
+    user: root
+    special_time: weekly
+    job: >-
+      /usr/bin/docker exec forgejo-runner-dind
+      docker system prune --all --force --filter until={{ forgejo_runner_prune_until }}
+      > /dev/null

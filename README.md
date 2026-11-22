@@ -29,6 +29,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
 | `keycloak` | The SSO: Keycloak, its Postgres, the realm and its clients, and oauth2-proxy for `forward_auth` |
 | `forgejo` | The git forge, its `app.ini` and the Keycloak authentication source |
+| `forgejo_runner` | The Forgejo Actions runner and the Docker-in-Docker daemon its jobs run on |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
 
@@ -84,6 +85,7 @@ The vault holds:
 | `vault_prowlarr_api_key`, `vault_sonarr_api_key`, `vault_radarr_api_key`, `vault_bazarr_api_key` | `arr_stack` and `homepage` — 32 hex characters each |
 | `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
 | `vault_forgejo_oidc_client_secret` | `forgejo` and `keycloak` — the OpenID Connect client secret, in clear |
+| `vault_forgejo_runner_secret` | `forgejo_runner` — 40 hex characters, the runner's offline registration secret and token |
 | `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` and `keycloak` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
 
 The four *arr keys are yours to pick rather than the applications': generating
@@ -246,6 +248,31 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 Changing the client secret afterwards means telling Forgejo about it: the
 authentication source lives in its database, not in a file, so set
 `forgejo_oidc_update: true` for one run.
+
+### Forgejo Actions
+
+`forgejo_actions_enabled: true` in group_vars, and one instance-wide runner,
+`homeserver`, from the `forgejo_runner` role. `runs-on: docker` or
+`runs-on: ubuntu-latest` both land on `node:24-trixie`.
+
+- **Jobs never touch the host's Docker.** The runner drives a privileged
+  Docker-in-Docker daemon, `forgejo-runner-dind`, on a network of its own with
+  no published port; the jobs see its containers and its images, not
+  Keycloak's or the forge's. Jobs get no Docker socket and no bind mounts
+  (`docker_host: "-"`, `valid_volumes: []`).
+- **Registration is offline.** `vault_forgejo_runner_secret` is handed to
+  Forgejo through `forgejo-cli actions register`, which prints the runner's
+  uuid, and to the runner in `/etc/forgejo-runner/config.yml`. Nothing to copy
+  from the web interface. Rotate it by changing only its last 24 characters:
+  the first 16 identify the runner.
+- **Jobs clone through `https://git.alexandre-gerault.fr`**, Forgejo's
+  `ROOT_URL`, like any other client.
+- **The images jobs pull accumulate** in the `forgejo_runner_docker` volume; a
+  weekly cron prunes whatever no job used for a week.
+
+```bash
+openssl rand -hex 20   # vault_forgejo_runner_secret
+```
 
 ## Signing in through Keycloak
 

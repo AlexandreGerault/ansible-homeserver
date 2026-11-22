@@ -95,9 +95,9 @@ docker exec -u git forgejo forgejo admin user create \
 
 ## Pas fait, volontairement
 
-- **Forgejo Actions** est à `false` : un runner est un conteneur et une décision
-  de plus, et l'activer sans runner ne fait que remplir une file que personne ne
-  vide.
+- ~~**Forgejo Actions** est à `false`~~ : activé, avec le rôle
+  `forgejo_runner` (runner v13 sur un démon Docker-in-Docker). Voir le README,
+  « Forgejo Actions ».
 - **Aucune tuile Homepage.** Le rôle `homepage` n'est pas touché.
 - **Pas de sauvegarde.** `/var/lib/forgejo` contient les dépôts et le SQLite ;
   rien dans ce dépôt ne le sauvegarde, comme pour tout le reste.

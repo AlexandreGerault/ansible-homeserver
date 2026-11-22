@@ -29,6 +29,10 @@
     # Keycloak as its authentication source, so the provider has to exist first.
     - role: forgejo
       tags: [forgejo, apps]
+    # After forgejo: the runner registers through the forgejo container's CLI,
+    # and polls a forge that has to have Actions enabled already.
+    - role: forgejo_runner
+      tags: [forgejo_runner, apps]
     - role: homepage
       tags: [homepage, apps]
     - role: arbitrage_ffv

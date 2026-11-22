@@ -1,0 +1,59 @@
+---
+# Pinned like the forge itself. v13 is the line that dropped the GITEA_*
+# variables and the set-output / set-env / add-path workflow commands, so a
+# workflow copied from an old GitHub Actions tutorial may need updating.
+forgejo_runner_image: data.forgejo.org/forgejo/runner:13.2.1
+
+# The Docker daemon the jobs run on. Not the host's: see tasks/main.yml.
+forgejo_runner_dind_image: docker.io/library/docker:29.9.2-dind
+
+# What the runner is called in Site administration → Actions → Runners.
+forgejo_runner_name: homeserver
+
+# Same split as forgejo: config.yml in /etc, the runner's state (the action
+# cache, the cloned actions) in /var/lib. The images the jobs pull live in a
+# named volume of the dind container, which is root's business, not this
+# account's.
+forgejo_runner_config_dir: /etc/forgejo-runner
+forgejo_runner_data_dir: /var/lib/forgejo-runner
+forgejo_runner_user: forgejo-runner
+forgejo_runner_docker_volume: forgejo_runner_docker
+
+# The runner and its daemon share this network and nothing else does: the
+# daemon listens on it without TLS, so whatever joins it is root in the daemon.
+forgejo_runner_network: forgejo_runner
+
+# Jobs at once. Each one is a container, so this is also how many may compete
+# for the CPU with everything else on the box.
+forgejo_runner_capacity: 1
+forgejo_runner_timeout: 3h
+
+# What `runs-on:` matches, as `<label>:docker://<image>`. ubuntu-latest is there
+# so workflows written for GitHub run unchanged — on a Debian image with node,
+# which is what most actions need, but not the full GitHub image: a step that
+# expects some preinstalled tool has to install it first.
+forgejo_runner_labels:
+  - docker:docker://node:24-trixie
+  - ubuntu-latest:docker://node:24-trixie
+
+# Where the runner reaches the forge — and where actions/checkout clones from,
+# since Forgejo hands the jobs its ROOT_URL. Through Caddy, like oauth2-proxy
+# reaches Keycloak: from inside the containers the public name works.
+forgejo_runner_instance_url: "https://{{ forgejo_domain }}/"
+
+# Images pulled by jobs pile up in the dind volume. A weekly prune removes what
+# no job used for this long.
+forgejo_runner_prune_until: 168h
+
+# The register command line carries the runner secret.
+forgejo_runner_no_log: true
+
+# Inherited from group_vars and the forgejo role; defaulted here so the role
+# still renders on its own.
+forgejo_domain: git.alexandre-gerault.fr
+forgejo_web_port: 3030
+forgejo_actions_enabled: false
+forgejo_wait_retries: 40
+forgejo_wait_delay: 5
+docker_publish_address: "127.0.0.1"
+common_timezone: Etc/UTC

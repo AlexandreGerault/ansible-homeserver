@@ -103,6 +103,11 @@
         source: "{{ forgejo_config_dir }}"
         target: /data/gitea/conf
 
+# Restart now if app.ini changed, rather than at the end of the play: the
+# forgejo_runner role connects next, and needs [actions] already enabled.
+- name: Apply the new configuration now
+  ansible.builtin.meta: flush_handlers
+
 - name: Wire the Keycloak authentication source
   ansible.builtin.include_tasks: oidc.yml
   when: forgejo_oidc_configure | bool
