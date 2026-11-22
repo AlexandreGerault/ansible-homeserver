@@ -13,6 +13,9 @@ keycloak_data_dir: /var/lib/keycloak
 
 keycloak_domain: auth.alexandre-gerault.fr
 keycloak_root_domain: alexandre-gerault.fr
+# The container's hostname, which is what Keycloak sends as its SMTP HELO. It
+# has to be a fully-qualified name, or the mail server refuses every mail.
+keycloak_helo_hostname: "keycloak.{{ keycloak_root_domain }}"
 keycloak_port: 8180
 oauth2_proxy_port: 4180
 docker_publish_address: "127.0.0.1"

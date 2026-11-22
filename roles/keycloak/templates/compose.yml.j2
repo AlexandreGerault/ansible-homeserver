@@ -42,6 +42,11 @@ services:
   keycloak:
     image: {{ keycloak_image }}
     container_name: keycloak
+    # What Keycloak says in its SMTP HELO: it has no setting for it and uses the
+    # container's hostname, a random hex id by default, which the mail server
+    # rejects with "need fully-qualified hostname". Not keycloak_domain itself:
+    # that name would then resolve to the container from inside it.
+    hostname: {{ keycloak_helo_hostname }}
     restart: unless-stopped
     depends_on:
       postgres:
