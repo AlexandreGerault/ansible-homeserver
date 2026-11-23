@@ -15,7 +15,14 @@
     # to travels in X-Auth-Request-Redirect: forward_auth keeps the original Host
     # header, which makes oauth2-proxy ignore X-Forwarded-Host and send the
     # browser back to the right path on the wrong vhost — Keycloak's.
+{% if site.public_paths | default([]) %}
+    # Reached by clients without a browser session (an API guarded by its own
+    # tokens): forward_auth would only send them to the Keycloak login page.
+    @protected not path {{ site.public_paths | join(' ') }}
+    forward_auth @protected {{ caddy_forward_auth_upstream }} {
+{% else %}
     forward_auth {{ caddy_forward_auth_upstream }} {
+{% endif %}
         uri /
         header_up X-Auth-Request-Redirect {scheme}://{hostport}{uri}
         # Not X-Auth-Request-Groups: an account in no group gets no such header,

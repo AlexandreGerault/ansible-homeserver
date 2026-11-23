@@ -14,12 +14,16 @@
       - vault_job_applications_app_key | default('') is match('^base64:')
       - vault_job_applications_oidc_client_secret | default('') | length >= 32
       - vault_job_applications_registry_token | default('') | length > 0
+      - vault_job_applications_passport_private_key | default('') is search('BEGIN PRIVATE KEY')
+      - vault_job_applications_passport_public_key | default('') is search('BEGIN PUBLIC KEY')
     fail_msg: >-
       Missing secrets. `ansible-vault edit group_vars/all/vault.yml` and add
       vault_job_applications_app_key (`base64:` + 32 random bytes in base64),
-      vault_job_applications_oidc_client_secret, and
+      vault_job_applications_oidc_client_secret,
       vault_job_applications_registry_token — a Forgejo personal access token
-      with the read:package scope. See the README.
+      with the read:package scope — and vault_job_applications_passport_private_key /
+      vault_job_applications_passport_public_key, the PEM keys the MCP server
+      signs its OAuth tokens with. See the README.
     quiet: true
 
 - name: Check the vault holds the SMTP password

@@ -53,7 +53,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `bazarr.alexandre-gerault.fr` | bazarr, 6767 — **behind the SSO** |
 | `requests.alexandre-gerault.fr` | jellyseerr, 5055 — authenticates against Jellyfin instead |
 | `git.alexandre-gerault.fr` | forgejo, 3030 — SSO through OpenID Connect, *not* forward_auth |
-| `jobs.alexandre-gerault.fr` | job-applications, 8085 — **behind the SSO**, and signs in through OpenID Connect |
+| `jobs.alexandre-gerault.fr` | job-applications, 8085 — **behind the SSO** except its MCP and OAuth endpoints, and signs in through OpenID Connect |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
 ## Variables
@@ -91,6 +91,7 @@ The vault holds:
 | `vault_job_applications_app_key` | `job_applications` — Laravel's `APP_KEY`, `base64:` + 32 random bytes; the passkeys are derived from it, so it is never regenerated |
 | `vault_job_applications_oidc_client_secret` | `job_applications` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_job_applications_registry_token` | `job_applications` — a Forgejo personal access token of `alexandregerault`, scope `read:package`, to pull the image |
+| `vault_job_applications_passport_private_key`, `vault_job_applications_passport_public_key` | `job_applications` — the PEM keys its MCP server signs OAuth access tokens with, as block scalars; `php artisan passport:keys` in a checkout writes them to `storage/oauth-*.key`. Regenerating them disconnects every agent |
 | `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` and `keycloak` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
 
 The four *arr keys are yours to pick rather than the applications': generating
@@ -131,6 +132,17 @@ Two details of the vhost template are load-bearing:
 - **`X-Auth-Request-Groups` is not copied** to the upstream: Caddy 2.6 sends the
   literal placeholder when the header is missing, which it is for an account in
   no group. Nothing reads these headers today anyway.
+
+A protected site can list `public_paths` that skip `forward_auth`, for clients
+that never hold a browser session and authenticate with their own tokens —
+Jobiflow's MCP server and the OAuth endpoints its agents call:
+
+```yaml
+    protect: true
+    public_paths:
+      - /mcp
+      - /oauth/token
+```
 
 To sign out of every protected vhost at once:
 `https://auth.alexandre-gerault.fr/oauth2/sign_out`. That drops oauth2-proxy's

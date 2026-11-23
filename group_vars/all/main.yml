@@ -177,11 +177,22 @@ caddy_sites:
   # protect: true *and* its own OpenID Connect login. The app keeps a local
   # registration form that no setting closes, so forward_auth is what keeps
   # strangers off it; the app's SSO button then rides the open Keycloak session.
+  # public_paths: the MCP server and the OAuth endpoints its agents call without
+  # a browser (discovery, client registration, token exchange). /mcp itself
+  # requires a Passport token; /oauth/authorize stays behind the SSO, it is the
+  # page the user approves the agent on.
   - name: job-applications
     domain: jobs.alexandre-gerault.fr
     upstream_port: 8085
     log: true
     protect: true
+    public_paths:
+      - /mcp
+      - /.well-known/oauth-protected-resource*
+      - /.well-known/oauth-authorization-server*
+      - /oauth/register
+      - /oauth/token
+      - /oauth/token/refresh
 
 # =============================================================================
 # Keycloak — SSO. Add `protect: true` to a caddy_sites entry to put it behind
