@@ -10,11 +10,6 @@
             type: jellyfin
             url: https://bibliofilm.alexandre-gerault.fr
             key: {{ vault_homepage_jellyfin_api_key }}
-    - ArbitrageFFV:
-        href: https://arbitrageffv.alexandre-gerault.fr/
-        icon: mdi-sail-boat
-        description: Application de gestion des inspections de bateaux
-        container: arbitrage_ffv_app
     - Jellyseerr:
         href: https://{{ arr_jellyseerr_domain }}
         icon: jellyseerr.png
@@ -70,3 +65,59 @@
             type: bazarr
             url: http://bazarr:6767
             key: {{ vault_bazarr_api_key }}
+
+# Pas de widget ici : ceux d'Uptime Kuma, de Forgejo et de Keycloak demandent un
+# jeton ou une page de statut qui n'existent pas encore.
+- Productivité:
+    - AFFiNE:
+        href: {{ affine_external_url }}
+        icon: affine.png
+        description: Notes, documents et tableaux blancs
+        container: affine_server
+    - Penpot:
+        href: https://penpot.alexandre-gerault.fr
+        icon: penpot.png
+        description: Design et prototypage
+        container: penpot-penpot-frontend-1
+    - Excalidraw:
+        href: https://excalidraw.alexandre-gerault.fr
+        icon: excalidraw.png
+        description: Schémas dessinés à la main
+    - Scholarsome:
+        href: https://scholarsome.alexandre-gerault.fr
+        icon: mdi-cards-outline
+        description: Fiches de révision
+        container: scholarsome-scholarsome-1
+
+- Applications:
+    - Jobiflow:
+        href: https://{{ job_applications_domain }}
+        icon: mdi-briefcase-search
+        description: Suivi des candidatures de stage
+        container: job-applications
+    - ArbitrageFFV:
+        href: {{ arbitrage_ffv_url }}
+        icon: mdi-sail-boat
+        description: Application de gestion des inspections de bateaux
+        container: arbitrage_ffv_app
+
+- Infrastructure:
+    - Forgejo:
+        href: https://{{ forgejo_domain }}
+        icon: forgejo.png
+        description: Forge git et registre de conteneurs
+        container: forgejo
+    - Forgejo Runner:
+        icon: forgejo.png
+        description: Exécuteur des Forgejo Actions
+        container: forgejo-runner
+    - Keycloak:
+        href: https://{{ keycloak_domain }}/admin/{{ keycloak_realm }}/console/
+        icon: keycloak.png
+        description: Authentification unique (SSO)
+        container: keycloak
+    - Uptime Kuma:
+        href: https://monitor.alexandre-gerault.fr
+        icon: uptime-kuma.png
+        description: Surveillance des services
+        container: uptime-kuma-uptime-kuma-1
