@@ -28,6 +28,20 @@ forgejo_runner_network: forgejo_runner
 forgejo_runner_capacity: 1
 forgejo_runner_timeout: 3h
 
+# Every job container lives inside the dind daemon, so its cgroup is the ceiling
+# for all of them together: a runaway build stops here instead of pushing
+# Keycloak and the media stack into swap on an 8 GB, 4-core box. memswap equal
+# to mem: past the limit the kernel kills inside dind, it does not swap the host.
+# The pids limit stops a fork bomb in a workflow from exhausting the host's.
+forgejo_runner_dind_cpus: 2
+forgejo_runner_dind_mem_limit: 3g
+forgejo_runner_dind_pids_limit: 4096
+
+# The runner only polls Forgejo and talks to dind; the cache server it hosts is
+# the only thing that grows.
+forgejo_runner_mem_limit: 256m
+forgejo_runner_cpus: 0.5
+
 # What `runs-on:` matches, as `<label>:docker://<image>`. ubuntu-latest is there
 # so workflows written for GitHub run unchanged — on a Debian image with node,
 # which is what most actions need, but not the full GitHub image: a step that

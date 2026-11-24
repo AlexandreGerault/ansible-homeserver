@@ -131,6 +131,10 @@
     restart_policy: unless-stopped
     privileged: true
     command: [dockerd, -H, "tcp://0.0.0.0:2375", --tls=false]
+    cpus: "{{ forgejo_runner_dind_cpus }}"
+    memory: "{{ forgejo_runner_dind_mem_limit }}"
+    memory_swap: "{{ forgejo_runner_dind_mem_limit }}"
+    pids_limit: "{{ forgejo_runner_dind_pids_limit }}"
     env:
       DOCKER_TLS_CERTDIR: ""
     networks:
@@ -148,6 +152,9 @@
     restart_policy: unless-stopped
     user: "{{ forgejo_runner_account.uid }}:{{ forgejo_runner_group_state.gid }}"
     command: [forgejo-runner, daemon, --config, /etc/forgejo-runner/config.yml]
+    cpus: "{{ forgejo_runner_cpus }}"
+    memory: "{{ forgejo_runner_mem_limit }}"
+    memory_swap: "{{ forgejo_runner_mem_limit }}"
     env:
       DOCKER_HOST: tcp://forgejo-runner-dind:2375
       HOME: /data
