@@ -23,7 +23,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `ssh` | sshd hardening, authorized keys, fail2ban, UFW |
 | `docker` | Docker CE from the upstream deb822 repository, `daemon.json`, the `docker` group |
 | `caddy` | Reverse proxy: main `Caddyfile` plus one vhost file per site, generated from `caddy_sites` |
-| `jellyfin` | Media account, media libraries, the Jellyfin container |
+| `jellyfin` | Media account, media libraries, the Jellyfin container, and the SSO-Auth plugin that signs in through Keycloak |
 | `qbittorrent` | The torrent client and the gluetun container that holds its VPN tunnel |
 | `arr_stack` | Prowlarr, Sonarr, Radarr, Bazarr and Jellyseerr, plus the wiring between them |
 | `homepage` | The dashboard container and its whole `/etc/homepage/config` tree |
@@ -39,7 +39,7 @@ Services reachable from the outside, all proxied by Caddy:
 | Domain | Upstream |
 | --- | --- |
 | `dashboard.homelab.alexandre-gerault.fr` | homepage, 8097 — **behind the SSO** |
-| `bibliofilm.alexandre-gerault.fr` | jellyfin, 8096 |
+| `bibliofilm.alexandre-gerault.fr` | jellyfin, 8096 — SSO through OpenID Connect on the web interface, passwords kept for the apps |
 | `affine.alexandre-gerault.fr` | affine, 3010 — SSO through OpenID Connect, password login kept |
 | `penpot.alexandre-gerault.fr` | penpot, 9001 — SSO through OpenID Connect only |
 | `scholarsome.alexandre-gerault.fr` | scholarsome, 4444 |
@@ -71,7 +71,7 @@ The vault holds:
 | Variable | Used by |
 | --- | --- |
 | `vault_ssh_authorized_keys` | `ssh` — a dict of account name to list of public keys |
-| `vault_homepage_jellyfin_api_key` | `homepage` — the Jellyfin widget |
+| `vault_homepage_jellyfin_api_key` | `homepage` and `jellyfin` — an admin API key: the Jellyfin widget, and the SSO-Auth plugin's configuration |
 | `vault_affine_db_password` | `compose_app` — affine's Postgres |
 | `vault_smtp_password` | `keycloak`, `forgejo`, `compose_app` (affine) — the `homeserver@alexandre-gerault.fr` mailbox on the mail server |
 | `vault_scholarsome_database_password`, `vault_scholarsome_jwt_secret` | `compose_app` — scholarsome |
@@ -92,6 +92,7 @@ The vault holds:
 | `vault_job_applications_oidc_client_secret` | `job_applications` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_job_applications_registry_token` | `job_applications` — a Forgejo personal access token of `alexandregerault`, scope `read:package`, to pull the image |
 | `vault_job_applications_passport_private_key`, `vault_job_applications_passport_public_key` | `job_applications` — the PEM keys its MCP server signs OAuth access tokens with, as block scalars; `php artisan passport:keys` in a checkout writes them to `storage/oauth-*.key`. Regenerating them disconnects every agent |
+| `vault_jellyfin_oidc_client_secret` | `jellyfin` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_affine_oidc_client_secret`, `vault_penpot_oidc_client_secret` | `compose_app` and `keycloak` — the OpenID Connect client secrets of AFFiNE and Penpot, in clear |
 
 The four *arr keys are yours to pick rather than the applications': generating

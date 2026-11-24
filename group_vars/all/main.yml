@@ -98,7 +98,7 @@ caddy_sites:
     upstream_port: 8097
     protect: true
   - name: jellyfin
-    domain: bibliofilm.alexandre-gerault.fr
+    domain: "{{ jellyfin_domain }}"
     upstream_port: 8096
   - name: arbitrageffv
     domain: arbitrageffv.alexandre-gerault.fr
@@ -245,6 +245,12 @@ keycloak_oidc_clients:
       - "https://{{ job_applications_domain }}/auth/oidc/callback"
     post_logout_redirect_uris:
       - "https://{{ job_applications_domain }}"
+  # Through the SSO-Auth plugin, which always uses PKCE and sends the secret.
+  - id: jellyfin
+    name: Jellyfin
+    secret: "{{ vault_jellyfin_oidc_client_secret }}"
+    redirect_uris:
+      - "https://{{ jellyfin_domain }}/sso/OID/redirect/{{ jellyfin_sso_provider }}"
 
 # =============================================================================
 # Outgoing mail — one account on the mail server, shared by Keycloak, Forgejo
@@ -261,12 +267,21 @@ smtp_sender: "Homeserver <noreply@alexandre-gerault.fr>"
 # =============================================================================
 # Jellyfin
 # =============================================================================
+jellyfin_domain: bibliofilm.alexandre-gerault.fr
 jellyfin_media_root: /var/jellyfin/media
 jellyfin_media_libraries:
   - anime
   - movie
   - music
   - show
+
+# Keycloak sign-in through the SSO-Auth plugin, on the web interface only: the
+# TV and mobile apps keep the Jellyfin passwords, or use Quick Connect.
+jellyfin_sso_enabled: true
+jellyfin_sso_provider: keycloak
+jellyfin_oidc_client_secret: "{{ vault_jellyfin_oidc_client_secret }}"
+# An admin API key, the one the Homepage widget already uses.
+jellyfin_api_key: "{{ vault_homepage_jellyfin_api_key }}"
 
 # =============================================================================
 # qBittorrent — behind gluetun, which holds the OpenVPN tunnel and the killswitch

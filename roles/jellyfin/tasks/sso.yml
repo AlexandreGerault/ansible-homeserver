@@ -1,0 +1,168 @@
+---
+# Jellyfin has no OpenID Connect of its own. The SSO-Auth plugin adds it, for
+# the web interface only: the TV and mobile apps still sign in with the
+# Jellyfin password, which the plugin leaves alone on existing accounts.
+
+- name: Locate the Jellyfin configuration volume
+  community.docker.docker_volume_info:
+    name: jellyfin-config
+  register: jellyfin_config_volume
+
+- name: Set the plugin paths
+  ansible.builtin.set_fact:
+    jellyfin_plugins_dir: "{{ jellyfin_config_volume.volume.Mountpoint }}/plugins"
+    jellyfin_sso_plugin_dir: "{{ jellyfin_config_volume.volume.Mountpoint }}/plugins/SSO-Auth_{{ jellyfin_sso_plugin_version }}"
+
+- name: Download the SSO-Auth plugin
+  ansible.builtin.get_url:
+    url: "{{ jellyfin_sso_plugin_url }}"
+    dest: "/var/cache/jellyfin-sso-auth_{{ jellyfin_sso_plugin_version }}.zip"
+    checksum: "{{ jellyfin_sso_plugin_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Find the installed SSO-Auth versions
+  ansible.builtin.find:
+    paths: "{{ jellyfin_plugins_dir }}"
+    patterns: "SSO-Auth_*,SSO Authentication_*"
+    file_type: directory
+  register: jellyfin_sso_installed
+
+# Jellyfin loads whichever version it finds, so an upgrade removes the others.
+- name: Remove the other SSO-Auth versions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ jellyfin_sso_installed.files | rejectattr('path', 'equalto', jellyfin_sso_plugin_dir) | list }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  register: jellyfin_sso_removed
+
+- name: Create the SSO-Auth plugin directory
+  ansible.builtin.file:
+    path: "{{ jellyfin_sso_plugin_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Unpack the SSO-Auth plugin
+  ansible.builtin.unarchive:
+    src: "/var/cache/jellyfin-sso-auth_{{ jellyfin_sso_plugin_version }}.zip"
+    dest: "{{ jellyfin_sso_plugin_dir }}"
+    remote_src: true
+    creates: "{{ jellyfin_sso_plugin_dir }}/SSO-Auth.dll"
+  register: jellyfin_sso_unpacked
+
+# A plain restart, not docker_container: that module would recreate the
+# container from whatever parameters it is given here.
+- name: Restart Jellyfin to load the plugin
+  ansible.builtin.command: docker restart jellyfin
+  changed_when: true
+  when: jellyfin_sso_unpacked is changed or jellyfin_sso_removed is changed
+
+- name: Wait for Jellyfin to answer
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8096/health
+    return_content: true
+  register: jellyfin_health
+  until: jellyfin_health.status == 200 and 'Healthy' in jellyfin_health.content
+  retries: 30
+  delay: 5
+
+- name: Read the SSO-Auth providers
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8096/sso/OID/Get
+    headers:
+      Authorization: 'MediaBrowser Token="{{ jellyfin_api_key }}"'
+    return_content: true
+  register: jellyfin_sso_providers
+  no_log: true
+
+# enableAuthorization off: the plugin then leaves the administrator flag and
+# the library access of each account alone, so they stay managed in Jellyfin.
+# The live TV permissions are rewritten on every login regardless.
+- name: Describe the Keycloak provider
+  ansible.builtin.set_fact:
+    jellyfin_sso_current: "{{ jellyfin_sso_providers.json[jellyfin_sso_provider] | default({}) }}"
+    jellyfin_sso_wanted:
+      OidEndpoint: "{{ jellyfin_oidc_issuer }}"
+      OidClientId: "{{ jellyfin_oidc_client_id }}"
+      OidSecret: "{{ jellyfin_oidc_client_secret }}"
+      Enabled: true
+      EnableAuthorization: false
+      EnableAllFolders: true
+      EnabledFolders: []
+      Roles: []
+      AdminRoles: []
+      EnableFolderRoles: false
+      FolderRoleMapping: []
+      EnableLiveTvRoles: false
+      EnableLiveTv: false
+      EnableLiveTvManagement: false
+      LiveTvRoles: []
+      LiveTvManagementRoles: []
+      RoleClaim: ""
+      OidScopes: []
+      DefaultUsernameClaim: preferred_username
+      # Caddy terminates TLS; Jellyfin sees plain http and would build an
+      # http:// redirect URI that Keycloak does not know.
+      SchemeOverride: https
+      DisableHttps: false
+      DoNotValidateEndpoints: false
+      DoNotValidateIssuerName: false
+  no_log: true
+
+# OID/Add replaces the whole provider, CanonicalLinks included: what is there
+# is sent back with the wanted settings over it, so the account links survive.
+- name: Configure the Keycloak provider
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8096/sso/OID/Add/{{ jellyfin_sso_provider }}"
+    method: POST
+    headers:
+      Authorization: 'MediaBrowser Token="{{ jellyfin_api_key }}"'
+    body_format: json
+    body: "{{ jellyfin_sso_current | combine(jellyfin_sso_wanted) }}"
+    status_code: [200, 204]
+  when: jellyfin_sso_current | combine(jellyfin_sso_wanted) != jellyfin_sso_current
+  changed_when: true
+  no_log: true
+
+- name: Read the branding configuration
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8096/System/Configuration/branding
+    headers:
+      Authorization: 'MediaBrowser Token="{{ jellyfin_api_key }}"'
+    return_content: true
+  register: jellyfin_branding
+
+# The login page has no SSO button of its own: the plugin's README puts one in
+# the login disclaimer.
+- name: Describe the login button
+  ansible.builtin.set_fact:
+    jellyfin_branding_wanted:
+      LoginDisclaimer: |-
+        <form action="https://{{ jellyfin_domain }}/sso/OID/start/{{ jellyfin_sso_provider }}">
+          <button class="raised block emby-button button-submit">{{ jellyfin_sso_button_label }}</button>
+        </form>
+      CustomCss: |-
+        a.raised.emby-button {
+          padding: 0.9em 1em;
+          color: inherit !important;
+        }
+        .disclaimerContainer {
+          display: block;
+        }
+
+- name: Add the Keycloak button to the login page
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8096/System/Configuration/branding
+    method: POST
+    headers:
+      Authorization: 'MediaBrowser Token="{{ jellyfin_api_key }}"'
+    body_format: json
+    body: "{{ jellyfin_branding.json | combine(jellyfin_branding_wanted) }}"
+    status_code: [200, 204]
+  when: jellyfin_branding.json | combine(jellyfin_branding_wanted) != jellyfin_branding.json
+  changed_when: true

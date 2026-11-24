@@ -6,3 +6,22 @@ jellyfin_media_libraries: []
 jellyfin_network_mode: "{{ media_network }}"
 media_network: media
 docker_publish_address: "127.0.0.1"
+
+# =============================================================================
+# Keycloak sign-in, through the SSO-Auth plugin (K0lin's fork of 9p4's, the
+# original being archived). Its 3.5.x line targets Jellyfin 10.9 and 10.10; 4.x
+# and 5.0 need 10.11, 5.1 and later need 12. Bump the two together.
+# =============================================================================
+jellyfin_sso_enabled: false
+jellyfin_domain: ""
+jellyfin_sso_provider: keycloak
+jellyfin_sso_plugin_version: "3.5.2.4"
+jellyfin_sso_plugin_url: "https://github.com/K0lin/jellyfin-plugin-sso/releases/download/v{{ jellyfin_sso_plugin_version }}/sso-authentication_{{ jellyfin_sso_plugin_version }}.zip"
+# The md5 the plugin's manifest publishes for that release.
+jellyfin_sso_plugin_checksum: "md5:e325bcf4c60c5cae3e0cd4614faae07a"
+jellyfin_sso_button_label: Se connecter avec Keycloak
+jellyfin_oidc_client_id: jellyfin
+jellyfin_oidc_client_secret: ""
+jellyfin_oidc_issuer: "https://{{ keycloak_domain }}/realms/{{ keycloak_realm }}"
+# An admin API key: the plugin's configuration endpoints require elevation.
+jellyfin_api_key: ""
