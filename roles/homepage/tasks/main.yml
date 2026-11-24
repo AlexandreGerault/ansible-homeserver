@@ -9,6 +9,7 @@
   loop:
     - "{{ homepage_config_dir }}"
     - "{{ homepage_config_dir }}/images"
+    - "{{ homepage_config_dir }}/icons"
 
 - name: Deploy the static homepage configuration
   ansible.builtin.copy:
@@ -31,6 +32,16 @@
   ansible.builtin.copy:
     src: images/background.jpg
     dest: "{{ homepage_config_dir }}/images/background.jpg"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Logos missing from the dashboard-icons set, served by homepage from
+# /app/public/icons and referenced as /icons/<name> in services.yaml.
+- name: Deploy the custom icons
+  ansible.builtin.copy:
+    src: icons/
+    dest: "{{ homepage_config_dir }}/icons/"
     owner: root
     group: root
     mode: "0644"
@@ -65,6 +76,9 @@
       - type: bind
         source: "{{ homepage_config_dir }}/images/background.jpg"
         target: /app/public/background.jpg
+      - type: bind
+        source: "{{ homepage_config_dir }}/icons"
+        target: /app/public/icons
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
