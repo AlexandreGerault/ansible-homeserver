@@ -174,6 +174,12 @@ caddy_sites:
     domain: git.alexandre-gerault.fr
     upstream_port: 3030
     log: true
+    # forgejo-mcp, for agents. Exactly /mcp, which Forgejo would otherwise serve
+    # as the profile page of a user called "mcp"; /mcp/<repo> still goes to the
+    # forge. Same name as the forge, so the Host it checks is the forge's.
+    routes:
+      - path: /mcp
+        upstream_port: "{{ forgejo_mcp_port }}"
   # protect: true *and* its own OpenID Connect login. The app keeps a local
   # registration form that no setting closes, so forward_auth is what keeps
   # strangers off it; the app's SSO button then rides the open Keycloak session.
@@ -355,6 +361,10 @@ forgejo_oidc_admin_group: admins
 # Forgejo Actions, with one instance-wide runner from the forgejo_runner role.
 # Jobs run on a Docker-in-Docker daemon of their own, never on the host's.
 forgejo_actions_enabled: true
+
+# forgejo-mcp, at https://git.alexandre-gerault.fr/mcp. Holds no token: each
+# agent sends its own Forgejo personal access token.
+forgejo_mcp_port: 8093
 
 # =============================================================================
 # job-applications — the internship-search tracker, from the forge's registry

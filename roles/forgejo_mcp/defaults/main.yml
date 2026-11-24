@@ -1,0 +1,20 @@
+---
+# Moved off Codeberg: releases and images now come from b4mad's forge. Pinned,
+# the vX.Y.Z tags are immutable. linux/amd64 only.
+forgejo_mcp_image: git.b4mad.industries/agentic-forges/forgejo-mcp:v3.5.0
+
+# Published on the loopback only; Caddy serves it at https://<forgejo_domain>/mcp.
+forgejo_mcp_port: 8093
+
+# Where the server calls the Forgejo API. Through Caddy, like the runner: the
+# forge's own port is published on the host loopback, which a container cannot
+# reach.
+forgejo_mcp_forgejo_url: "https://{{ forgejo_domain }}"
+
+forgejo_mcp_mem_limit: 128m
+forgejo_mcp_cpus: 0.5
+
+# Inherited from group_vars; defaulted here so the role still renders on its own.
+forgejo_domain: git.alexandre-gerault.fr
+docker_publish_address: "127.0.0.1"
+common_timezone: Etc/UTC

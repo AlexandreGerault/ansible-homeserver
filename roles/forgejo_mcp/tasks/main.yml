@@ -1,0 +1,57 @@
+---
+# An MCP server for the forge, so agents can read and change repositories,
+# issues and pull requests over the Forgejo API.
+#
+# Passthrough mode: every request carries the caller's Forgejo personal access
+# token in its Authorization header, the server hands it to Forgejo, and Forgejo
+# decides what that token may do. A request without one gets a 401 — the
+# operator-token fallback stays off. So /mcp can sit on the public vhost like the
+# rest of the API.
+#
+# It still holds a token of its own, for one reason: at start it calls the API to
+# check the forge answers, and this forge refuses anonymous API calls, so without
+# one the server exits. read:misc is enough for that and reads nothing else.
+#
+# --host 0.0.0.0 is the container's interface, not the host's: the port is
+# published on the loopback only. --allowed-hosts is the Host Caddy passes on,
+# which the server checks against DNS rebinding.
+
+- name: Check the vault holds the forgejo-mcp token
+  ansible.builtin.assert:
+    that:
+      - vault_forgejo_mcp_token | default('') is match('^[0-9a-f]{40}$')
+    fail_msg: >-
+      `ansible-vault edit group_vars/all/vault.yml` and add vault_forgejo_mcp_token:
+      a Forgejo access token with the read:misc scope only, for the server's
+      startup check. See the README.
+    quiet: true
+
+- name: Run the forgejo-mcp container
+  community.docker.docker_container:
+    name: forgejo-mcp
+    image: "{{ forgejo_mcp_image }}"
+    state: started
+    restart_policy: unless-stopped
+    command:
+      - --transport
+      - http
+      - --host
+      - 0.0.0.0
+      - --http-port
+      - "8080"
+      - --allowed-hosts
+      - "{{ forgejo_domain }}"
+      - --url
+      - "{{ forgejo_mcp_forgejo_url }}"
+    env:
+      FORGEJO_ACCESS_TOKEN: "{{ vault_forgejo_mcp_token }}"
+      TZ: "{{ common_timezone }}"
+    published_ports:
+      - "{{ docker_publish_address }}:{{ forgejo_mcp_port }}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opts: [no-new-privileges]
+    cpus: "{{ forgejo_mcp_cpus }}"
+    memory: "{{ forgejo_mcp_mem_limit }}"
+    memory_swap: "{{ forgejo_mcp_mem_limit }}"
+  no_log: true

@@ -30,6 +30,7 @@ a mini-PC serving as a homeserver, and everything running on it.
 | `keycloak` | The SSO: Keycloak, its Postgres, the realm and its clients, and oauth2-proxy for `forward_auth` |
 | `forgejo` | The git forge, its `app.ini` and the Keycloak authentication source |
 | `forgejo_runner` | The Forgejo Actions runner and the Docker-in-Docker daemon its jobs run on |
+| `forgejo_mcp` | An MCP server for the forge, so agents can work on repositories, issues and pull requests |
 | `job_applications` | The internship-search tracker from the forge's registry: web, queue worker and scheduler |
 | `arbitrage_ffv` | The Laravel app and its MySQL database |
 | `compose_app` | Generic role, applied once per entry of `compose_apps` (affine, penpot, scholarsome, uptime-kuma) |
@@ -52,7 +53,7 @@ Services reachable from the outside, all proxied by Caddy:
 | `radarr.alexandre-gerault.fr` | radarr, 7878 — **behind the SSO** |
 | `bazarr.alexandre-gerault.fr` | bazarr, 6767 — **behind the SSO** |
 | `requests.alexandre-gerault.fr` | jellyseerr, 5055 — authenticates against Jellyfin instead |
-| `git.alexandre-gerault.fr` | forgejo, 3030 — SSO through OpenID Connect, *not* forward_auth |
+| `git.alexandre-gerault.fr` | forgejo, 3030 — SSO through OpenID Connect, *not* forward_auth — and forgejo-mcp, 8093, at exactly `/mcp` |
 | `jobs.alexandre-gerault.fr` | job-applications, 8085 — **behind the SSO** except its MCP and OAuth endpoints, and signs in through OpenID Connect |
 | `excalidraw.alexandre-gerault.fr` | excalidraw, 5000 — **no container, it was started with `--rm`** |
 
@@ -88,6 +89,7 @@ The vault holds:
 | `vault_forgejo_secret_key`, `vault_forgejo_internal_token`, `vault_forgejo_lfs_jwt_secret`, `vault_forgejo_oauth2_jwt_secret` | `forgejo` — written into `app.ini`; regenerating one of them makes what it encrypted unreadable |
 | `vault_forgejo_oidc_client_secret` | `forgejo` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_forgejo_runner_secret` | `forgejo_runner` — 40 hex characters, the runner's offline registration secret and token |
+| `vault_forgejo_mcp_token` | `forgejo_mcp` — a Forgejo access token of `alexandregerault`, scope `read:misc` only, for the server's startup check |
 | `vault_job_applications_app_key` | `job_applications` — Laravel's `APP_KEY`, `base64:` + 32 random bytes; the passkeys are derived from it, so it is never regenerated |
 | `vault_job_applications_oidc_client_secret` | `job_applications` and `keycloak` — the OpenID Connect client secret, in clear |
 | `vault_job_applications_registry_token` | `job_applications` — a Forgejo personal access token of `alexandregerault`, scope `read:package`, to pull the image |
@@ -290,6 +292,32 @@ authentication source lives in its database, not in a file, so set
 
 ```bash
 openssl rand -hex 20   # vault_forgejo_runner_secret
+```
+
+### The MCP server
+
+`forgejo_mcp` runs [forgejo-mcp](https://git.b4mad.industries/agentic-forges/forgejo-mcp)
+over streamable HTTP at `https://git.alexandre-gerault.fr/mcp`. It holds no
+access of its own: each agent sends its own Forgejo personal access token, and
+gets exactly what that token allows. A request without one gets a 401.
+
+```bash
+claude mcp add --transport http forgejo https://git.alexandre-gerault.fr/mcp \
+  --header "Authorization: token <personal access token>"
+```
+
+Create that token under *Settings → Applications*, with the scopes the agent
+should have — `read:repository` and `read:issue` for a reader, the `write:`
+ones for an agent that opens issues and pull requests.
+
+The server's own token, `vault_forgejo_mcp_token`, exists only because the
+server calls the API once at start to check the forge answers, and this forge
+refuses anonymous API calls. `read:misc` is enough and reads nothing else:
+
+```bash
+ssh homeserver docker exec -u git forgejo forgejo admin user generate-access-token \
+  --username alexandregerault --token-name forgejo-mcp-startup-check \
+  --scopes read:misc --raw
 ```
 
 ## Signing in through Keycloak

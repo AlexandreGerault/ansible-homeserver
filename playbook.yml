@@ -33,6 +33,8 @@
     # and polls a forge that has to have Actions enabled already.
     - role: forgejo_runner
       tags: [forgejo_runner, apps]
+    - role: forgejo_mcp
+      tags: [forgejo_mcp, apps]
     # After keycloak, which registers its OpenID Connect client, and after
     # forgejo, whose registry the image comes from.
     - role: job_applications
